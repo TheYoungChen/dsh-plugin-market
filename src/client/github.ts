@@ -77,17 +77,48 @@ async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   }
 }
 
-/* ---- static registry (CDN first, raw fallback) ---- */
+/* ---- static registry (CDN first, raw fallback, localStorage last-known) ---- */
 
 let registryCache: MarketPage | null = null
+const REGISTRY_STORAGE_KEY = 'dsh-market-registry-v1'
+
+function readStoredRegistry(): MarketPage | null {
+  try {
+    const raw = window.localStorage.getItem(REGISTRY_STORAGE_KEY)
+    if (raw === null) return null
+    const parsed = JSON.parse(raw) as { items?: MarketPlugin[]; totalCount?: number }
+    if (!Array.isArray(parsed.items) || parsed.items.length === 0) return null
+    return { items: parsed.items, totalCount: parsed.totalCount ?? parsed.items.length }
+  } catch {
+    return null
+  }
+}
+
+function writeStoredRegistry(page: MarketPage): void {
+  try {
+    window.localStorage.setItem(REGISTRY_STORAGE_KEY, JSON.stringify({ items: page.items, totalCount: page.totalCount }))
+  } catch {
+    // Quota or privacy mode — the in-memory cache still covers this session.
+  }
+}
 
 /** Drop the cached registry so the next load re-fetches it (the refresh button). */
 export function invalidateRegistry(): void {
   registryCache = null
+  try {
+    window.localStorage.removeItem(REGISTRY_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
 }
 
 async function fetchRegistry(): Promise<MarketPage> {
   if (registryCache !== null) return registryCache
+  const stored = readStoredRegistry()
+  if (stored !== null) {
+    registryCache = stored
+    return stored
+  }
   const urls = [
     `https://cdn.jsdelivr.net/gh/${REGISTRY_REPO}@main/registry.json`,
     `https://raw.githubusercontent.com/${REGISTRY_REPO}/main/registry.json`,
@@ -95,7 +126,7 @@ async function fetchRegistry(): Promise<MarketPage> {
   let lastError: unknown = new Error('registry unavailable')
   for (const url of urls) {
     try {
-      const response = await fetchWithTimeout(url, 3500)
+      const response = await fetchWithTimeout(url, 2500)
       if (!response.ok) {
         lastError = new Error(`registry ${response.status}`)
         continue
@@ -105,6 +136,7 @@ async function fetchRegistry(): Promise<MarketPage> {
         .map(toPlugin)
         .filter(item => item.fullName.length > 0 && !EXCLUDED.has(item.fullName))
       registryCache = { items, totalCount: items.length }
+      writeStoredRegistry(registryCache)
       return registryCache
     } catch (error) {
       lastError = error

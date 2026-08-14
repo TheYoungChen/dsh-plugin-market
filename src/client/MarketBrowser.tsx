@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import { IconLoadingOutline16, IconRightUpOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlugin, type MarketSort, type PluginCategory, type PluginType } from './github.ts'
-import { cleanupInstall, fetchInstalled, type InstalledPlugin } from './api.ts'
+import { cleanupInstall, fetchInstalled, uninstallInstall, type InstalledPlugin } from './api.ts'
 import {
   backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
   useInstallJobs, type InstallJob,
@@ -96,6 +96,10 @@ const installedButtonStyle: React.CSSProperties = {
   padding: '5px 12px', border: 0, borderRadius: 8,
   background: 'var(--dsw-alias-interactive-bg-hover)', color: 'var(--dsw-alias-label-tertiary)',
   fontSize: 13, cursor: 'default',
+}
+const uninstallButtonStyle: React.CSSProperties = {
+  padding: '5px 12px', border: 0, borderRadius: 8,
+  background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', fontSize: 13, cursor: 'pointer',
 }
 const installedTagStyle: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', padding: '2px 8px',
@@ -260,6 +264,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const [category, setCategory] = useState<PluginCategory>('all')
   const [sort, setSort] = useState<MarketSort>('stars')
   const [confirming, setConfirming] = useState<MarketPlugin | null>(null)
+  const [uninstalling, setUninstalling] = useState<{ name: string; type: string; repoName: string } | null>(null)
   const [foregroundId, setForegroundId] = useState<string | null>(null)
   const jobs = useInstallJobs()
   const [installed, setInstalled] = useState<readonly InstalledPlugin[]>([])
@@ -346,6 +351,23 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const cleanupInstallEntry = async (info: InstalledPlugin): Promise<void> => {
     try {
       await cleanupInstall(info.name)
+    } catch {
+      // The refresh below reflects the real state either way.
+    }
+    try {
+      const fresh = await fetchInstalled()
+      setInstalled(fresh)
+    } catch {
+      // Ignore a refresh failure; the list stays as-is.
+    }
+  }
+
+  const onUninstall = async (): Promise<void> => {
+    if (uninstalling === null) return
+    const target = uninstalling
+    setUninstalling(null)
+    try {
+      await uninstallInstall(target.name, target.type, target.repoName)
     } catch {
       // The refresh below reflects the real state either way.
     }
@@ -458,15 +480,20 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
                     {info !== undefined ? (
                       info.broken ? (
                         <button type="button" style={dangerButtonStyle} onClick={() => { void cleanupInstallEntry(info) }}>{t('cleanup')}</button>
-                      ) : isUpdate(plugin) ? (
-                        <button
-                          type="button"
-                          style={installButtonStyle}
-                          data-market-install={plugin.fullName}
-                          onClick={() => { setConfirming(plugin) }}
-                        >{t('update')}</button>
                       ) : (
-                        <button type="button" disabled style={installedButtonStyle}>{t('installed')}</button>
+                        <>
+                          {isUpdate(plugin) ? (
+                            <button
+                              type="button"
+                              style={installButtonStyle}
+                              data-market-install={plugin.fullName}
+                              onClick={() => { setConfirming(plugin) }}
+                            >{t('update')}</button>
+                          ) : (
+                            <button type="button" disabled style={installedButtonStyle}>{t('installed')}</button>
+                          )}
+                          <button type="button" style={uninstallButtonStyle} onClick={() => { setUninstalling({ name: info.name, type: plugin.type ?? 'plugin', repoName: plugin.name }) }}>{t('uninstall')}</button>
+                        </>
                       )
                     ) : (
                       <button
@@ -536,6 +563,19 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
               ) : (
                 <button type="button" style={primaryButtonStyle} onClick={() => { dismissJob(foreground.id); setForegroundId(null) }}>{t('installing.close')}</button>
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {uninstalling !== null ? (
+        <div style={dialogBackdropStyle} onClick={() => { setUninstalling(null) }}>
+          <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={t('uninstall.confirm.title', { name: uninstalling.name })} onClick={stop}>
+            <h3 style={dialogTitleStyle}>{t('uninstall.confirm.title', { name: uninstalling.name })}</h3>
+            <p style={dialogBodyStyle}>{t('uninstall.confirm.body', { name: uninstalling.name })}</p>
+            <div style={actionsStyle}>
+              <button type="button" style={actionButtonStyle} onClick={() => { setUninstalling(null) }}>{t('confirm.cancel')}</button>
+              <button type="button" style={dangerButtonStyle} onClick={() => { void onUninstall() }}>{t('uninstall.confirm.start')}</button>
             </div>
           </div>
         </div>

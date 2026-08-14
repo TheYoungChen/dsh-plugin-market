@@ -10,7 +10,7 @@
  * panel fetches this route directly, like dsh-external/plugin-console.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -140,6 +140,38 @@ function cleanupPlugin(name: string): string[] {
   manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: without } }
   writeProfileManifest(manifest)
   return bundles.length === without.length ? [] : [name]
+}
+
+/** Remove an installed plugin: profile dependency/bundle + on-disk artifacts. */
+function uninstallPlugin(name: string, type: string, repoName: string): string {
+  if (name === 'dsh-plugin-market') return 'refusing to uninstall the market itself'
+  const manifest = readProfileManifest()
+  const deps = { ...(manifest.dependencies ?? {}) }
+  delete deps[name]
+  manifest.dependencies = deps
+  const bundles = [...(manifest.dsh?.profile?.bundles ?? [])]
+  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: bundles.filter(bundle => bundle !== name) } }
+  writeProfileManifest(manifest)
+  try {
+    rmSync(join(profileWebDir(), 'node_modules', name), { recursive: true, force: true })
+  } catch {
+    // Best effort; the manifest is already clean.
+  }
+  const target = type === 'skill'
+    ? join(dshHome(), 'skills', repoName)
+    : type === 'preset'
+      ? join(dshHome(), '.agent-presets', repoName)
+      : type === 'script'
+        ? join(dshHome(), 'marketplace', 'cache', repoName)
+        : null
+  if (target !== null) {
+    try {
+      rmSync(target, { recursive: true, force: true })
+    } catch {
+      // Best effort.
+    }
+  }
+  return ''
 }
 
 interface InstallJob {
@@ -312,6 +344,32 @@ export function apply(ctx: Context): void {
             }
             const bundlesRemoved = cleanupPlugin(name)
             json(200, { ok: true, bundlesRemoved })
+          })
+          return
+        }
+
+        if (method === 'POST' && (path === '/api/plugin-market/uninstall' || path === '/api/plugin-market/uninstall/')) {
+          let body = ''
+          req.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
+          req.on('end', () => {
+            let parsed: { name?: string; type?: string; repoName?: string }
+            try {
+              parsed = JSON.parse(body) as { name?: string; type?: string; repoName?: string }
+            } catch {
+              json(400, { ok: false, message: 'invalid JSON body' })
+              return
+            }
+            const name = (parsed.name ?? '').trim()
+            if (name.length === 0) {
+              json(400, { ok: false, message: 'uninstall needs a name' })
+              return
+            }
+            const message = uninstallPlugin(name, parsed.type === 'skill' || parsed.type === 'preset' || parsed.type === 'script' ? parsed.type : 'plugin', parsed.repoName ?? '')
+            if (message.length > 0) {
+              json(400, { ok: false, message })
+              return
+            }
+            json(200, { ok: true })
           })
           return
         }

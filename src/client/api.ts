@@ -80,3 +80,16 @@ export async function cleanupInstall(name: string): Promise<void> {
     throw new Error(payload.message ?? `cleanup failed: ${response.status}`)
   }
 }
+
+/** Uninstall a plugin: profile dependency/bundle + on-disk files. */
+export async function uninstallInstall(name: string, type: string, repoName: string): Promise<void> {
+  const response = await fetch('/api/plugin-market/uninstall', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, type, repoName }),
+  })
+  const payload = (await response.json()) as { ok?: boolean; message?: string }
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(payload.message ?? `uninstall failed: ${response.status}`)
+  }
+}

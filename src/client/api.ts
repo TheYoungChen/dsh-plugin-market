@@ -58,14 +58,36 @@ export interface InstalledPlugin {
   broken: boolean
 }
 
-/** List the plugins installed in the web profile (for the "已安装" badge). */
-export async function fetchInstalled(): Promise<InstalledPlugin[]> {
+/** The profile's installed plugins plus its full bundle layer stack. */
+export interface InstalledReport {
+  plugins: InstalledPlugin[]
+  bundles: string[]
+}
+
+let installedCache: { at: number; value: InstalledReport } | null = null
+const INSTALLED_TTL = 30_000
+
+/**
+ * List the plugins installed in the web profile, cached for 30s so reopening
+ * the market does not re-request it. Pass `force` after any install/cleanup.
+ */
+export async function fetchInstalled(force = false): Promise<InstalledReport> {
+  if (!force && installedCache !== null && Date.now() - installedCache.at < INSTALLED_TTL) {
+    return installedCache.value
+  }
   const response = await fetch('/api/plugin-market/installed')
-  const payload = (await response.json()) as { ok?: boolean; plugins?: InstalledPlugin[]; message?: string }
+  const payload = (await response.json()) as {
+    ok?: boolean
+    plugins?: InstalledPlugin[]
+    bundles?: string[]
+    message?: string
+  }
   if (!response.ok || payload.ok !== true || payload.plugins === undefined) {
     throw new Error(payload.message ?? `installed fetch failed: ${response.status}`)
   }
-  return payload.plugins
+  const value: InstalledReport = { plugins: payload.plugins, bundles: payload.bundles ?? [] }
+  installedCache = { at: Date.now(), value }
+  return value
 }
 
 /** Remove a broken dependency (and its bundle entry) from the web profile. */

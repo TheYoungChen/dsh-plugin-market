@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { PluginMarketPanel } from './PluginMarketPanel.tsx'
 import { MarketSettingsTab } from './MarketSettingsTab.tsx'
+import { InstalledManager } from './InstalledManager.tsx'
 import { en, zh, type PluginMarketKey } from './locales.ts'
 
 export type { PluginMarketKey } from './locales.ts'
@@ -36,4 +37,12 @@ export function apply(ctx: ClientContext): void {
     label: () => t('title'),
     locale: NS,
   }, MarketSettingsTab))
+
+  ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
+    name: 'settings.plugins.tab',
+    id: 'installed',
+    order: 30,
+    label: () => t('manager.title'),
+    locale: NS,
+  }, InstalledManager))
 }

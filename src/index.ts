@@ -375,7 +375,7 @@ export function apply(ctx: Context): void {
         }
 
         if (method === 'GET' && (path === '/api/plugin-market/installed' || path === '/api/plugin-market/installed/')) {
-          json(200, { ok: true, plugins: listInstalledPlugins() })
+          json(200, { ok: true, plugins: listInstalledPlugins(), bundles: readProfileManifest().dsh?.profile?.bundles ?? [] })
           return
         }
 

@@ -227,7 +227,12 @@ export async function fetchMarketPage(
 }
 
 /** Fetch the latest `version` from a repo's root package.json (base64 contents API). */
+const latestVersionCache = new Map<string, { at: number; version: string | undefined }>()
+const LATEST_VERSION_TTL = 5 * 60_000
+
 export async function fetchLatestVersion(fullName: string): Promise<string | undefined> {
+  const hit = latestVersionCache.get(fullName)
+  if (hit !== undefined && Date.now() - hit.at < LATEST_VERSION_TTL) return hit.version
   try {
     const response = await fetchWithTimeout(`https://api.github.com/repos/${fullName}/contents/package.json`, 6000)
     if (!response.ok) return undefined
@@ -235,6 +240,7 @@ export async function fetchLatestVersion(fullName: string): Promise<string | und
     if (payload.content === undefined || payload.encoding !== 'base64') return undefined
     const text = atob(payload.content.replace(/\n/g, ''))
     const pkg = JSON.parse(text) as { version?: string }
+    latestVersionCache.set(fullName, { at: Date.now(), version: pkg.version })
     return pkg.version
   } catch {
     return undefined

@@ -273,13 +273,13 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
 
   useEffect(() => { ensureSpinKeyframe() }, [])
   useEffect(() => {
-    void fetchInstalled().then(setInstalled, () => {})
+    void fetchInstalled().then(report => setInstalled(report.plugins), () => {})
   }, [])
   useEffect(() => {
     for (const job of jobs) {
       if (job.status === 'done' && !refreshedDone.current.has(job.id)) {
         refreshedDone.current.add(job.id)
-        void fetchInstalled().then(setInstalled, () => {})
+        void fetchInstalled(true).then(report => setInstalled(report.plugins), () => {})
       }
     }
   }, [jobs])
@@ -355,8 +355,8 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
       // The refresh below reflects the real state either way.
     }
     try {
-      const fresh = await fetchInstalled()
-      setInstalled(fresh)
+      const fresh = await fetchInstalled(true)
+      setInstalled(fresh.plugins)
     } catch {
       // Ignore a refresh failure; the list stays as-is.
     }
@@ -372,8 +372,8 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
       // The refresh below reflects the real state either way.
     }
     try {
-      const fresh = await fetchInstalled()
-      setInstalled(fresh)
+      const fresh = await fetchInstalled(true)
+      setInstalled(fresh.plugins)
     } catch {
       // Ignore a refresh failure; the list stays as-is.
     }

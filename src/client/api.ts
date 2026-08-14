@@ -46,3 +46,21 @@ export async function cancelInstall(jobId: string): Promise<void> {
     throw new Error(payload.message ?? `cancel failed: ${response.status}`)
   }
 }
+
+/** One plugin already installed in the web profile. */
+export interface InstalledPlugin {
+  name: string
+  version: string
+  /** Normalized `owner/repo`, when the package declares a GitHub repository. */
+  repo?: string
+}
+
+/** List the plugins installed in the web profile (for the "已安装" badge). */
+export async function fetchInstalled(): Promise<InstalledPlugin[]> {
+  const response = await fetch('/api/plugin-market/installed')
+  const payload = (await response.json()) as { ok?: boolean; plugins?: InstalledPlugin[]; message?: string }
+  if (!response.ok || payload.ok !== true || payload.plugins === undefined) {
+    throw new Error(payload.message ?? `installed fetch failed: ${response.status}`)
+  }
+  return payload.plugins
+}

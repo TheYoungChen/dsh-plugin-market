@@ -73,6 +73,50 @@ function reconcileBundles(): string[] {
   return joined
 }
 
+interface InstalledPlugin {
+  name: string
+  version: string
+  /** Normalized `owner/repo`, when the package declares a GitHub repository. */
+  repo?: string
+}
+
+/** Normalize a package `repository` field to `owner/repo`, if it is GitHub. */
+function normalizeRepo(repository: unknown): string | undefined {
+  if (repository === null || repository === undefined) return undefined
+  if (typeof repository === 'object') {
+    return normalizeRepo((repository as { url?: unknown }).url)
+  }
+  if (typeof repository !== 'string') return undefined
+  const value = repository.trim()
+  const https = /github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(value)
+  if (https !== null) return `${https[1]}/${https[2]}`.toLowerCase()
+  const shorthand = /^github:([\w.-]+)\/([\w.-]+)$/i.exec(value)
+  if (shorthand !== null) return `${shorthand[1]}/${shorthand[2]}`.toLowerCase()
+  return undefined
+}
+
+/** Enumerate the plugins installed in the web profile (top-level deps only). */
+function listInstalledPlugins(): InstalledPlugin[] {
+  const manifest = readProfileManifest()
+  const result: InstalledPlugin[] = []
+  for (const name of Object.keys(manifest.dependencies ?? {})) {
+    try {
+      const pkg = JSON.parse(readFileSync(
+        join(profileWebDir(), 'node_modules', name, 'package.json'),
+        'utf8',
+      )) as { name?: string; version?: string; repository?: unknown }
+      result.push({
+        name: pkg.name ?? name,
+        version: pkg.version ?? '',
+        repo: normalizeRepo(pkg.repository),
+      })
+    } catch {
+      // Not resolvable to a package.json — not a plugin we can match.
+    }
+  }
+  return result
+}
+
 interface InstallJob {
   status: 'running' | 'done' | 'error' | 'canceled'
   output: string
@@ -181,6 +225,11 @@ export function apply(ctx: Context): void {
             })
             json(202, { ok: true, jobId })
           })
+          return
+        }
+
+        if (method === 'GET' && (path === '/api/plugin-market/installed' || path === '/api/plugin-market/installed/')) {
+          json(200, { ok: true, plugins: listInstalledPlugins() })
           return
         }
 

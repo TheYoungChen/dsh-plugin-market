@@ -2,10 +2,38 @@
 
 一个 DeepSeek Harness（dsh）插件市场 bundle 插件：在 Web UI 左侧「设置」上方新增「插件市场」入口（同时集成到 设置 → 插件 → 插件市场 标签页），分页浏览 GitHub [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic 里的全部插件，支持搜索、一键安装与实时进度。
 
+![GitHub Stars](https://img.shields.io/github/stars/TheYoungChen/dsh-plugin-market?logo=github&label=Stars)
+![License](https://img.shields.io/github/license/TheYoungChen/dsh-plugin-market?label=License)
+![Last Commit](https://img.shields.io/github/last-commit/TheYoungChen/dsh-plugin-market?label=Last%20Commit)
+![Repo Size](https://img.shields.io/github/repo-size/TheYoungChen/dsh-plugin-market?label=Size)
+
+## 📸 截图
+
+![插件市场弹窗](docs/screenshots/market-modal.png)
+
+![设置 → 插件 → 插件市场](docs/screenshots/settings-tab.png)
+
+![安装进度（可终止 / 后台下载）](docs/screenshots/install-progress.png)
+
+## ⚡ 一键安装（复制即用）
+
+**喂给 AI 的一句话**（AI 具备命令执行能力即可，无需解释）：
+
+> 安装 dsh-plugin-market：运行 `dsh plugin --profile web add github:TheYoungChen/dsh-plugin-market`，然后重启 `dsh web`。
+
+**或者直接复制命令：**
+
+```bash
+dsh plugin --profile web add github:TheYoungChen/dsh-plugin-market && dsh web
+```
+
+> 本插件无 `prepare` 构建脚本、`lib/` 已预编译，git 安装零额外构建；安装完成后重启 dsh 生效。
+
 ## 功能
 
 - **双入口**：侧边栏「设置」上方的入口按钮；设置 → 插件 → 插件市场 标签页，内容一致
 - **浏览 / 搜索 / 分页**：聚合 `dsh-plugin` topic 全部插件，按 star 排序，关键字搜索，每页 20 条
+- **已安装识别**：读 profile 真实依赖 + `repository` 归属校验，已装的插件置顶并标记「已安装 v版本」，按钮变灰、避免重复安装
 - **一键安装**：确认框 → 真实执行 `pnpm add github:<owner/repo>`（等价于官方 `dsh plugin add`），自动把声明 `dsh.bundle` 的依赖 reconcile 进 `dsh.profile.bundles` 层栈
 - **安装可视化**：实时日志 + 已用时长，可随时**终止**（真正杀掉 pnpm 进程）或转**后台下载**
 - **后台通知**：右上角常驻状态条，运行中可终止；完成后带「重启并生效」按钮、3 秒自动消失，也可手动关闭
@@ -17,20 +45,6 @@
 - **client half**（`src/client/`）：注册 `sidebar.footer.action` 与 `settings.plugins.tab` 槽位；`MarketBrowser` 是共享的浏览/安装组件，`installStore` 管理前后台安装任务，后台任务以右上角 toast 呈现。
 
 两者都只用官方机制（bundle 层栈 + 用户 patch 层 + webServer 路由），不改官方仓库、不依赖私有内部包。
-
-## 安装
-
-```sh
-# 从 GitHub 安装
-dsh plugin --profile web add github:TheYoungChen/dsh-plugin-market
-
-# 或从 npm 安装（若已发布）
-dsh plugin --profile web add dsh-plugin-market
-```
-
-装完重启 dsh，左侧「设置」上方出现「插件市场」入口。
-
-> `lib/` 已预构建（无 `prepare` 脚本），git 安装无需额外构建步骤。
 
 ## 安装行为与注意事项
 

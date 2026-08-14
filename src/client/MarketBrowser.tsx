@@ -1,9 +1,10 @@
 /** Shared market browser: search + paginated list + install flow. */
 
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { IconLoadingOutline16, IconRightUpOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { fetchMarketPage, type MarketPlugin } from './github.ts'
+import { fetchInstalled, type InstalledPlugin } from './api.ts'
 import {
   backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
   useInstallJobs, type InstallJob,
@@ -85,6 +86,17 @@ const installButtonStyle: React.CSSProperties = {
   padding: '5px 12px', border: 0, borderRadius: 8,
   background: 'var(--dsw-alias-action-primary, #4c8dff)', color: '#fff', fontSize: 13, cursor: 'pointer',
 }
+const installedButtonStyle: React.CSSProperties = {
+  padding: '5px 12px', border: 0, borderRadius: 8,
+  background: 'var(--dsw-alias-interactive-bg-hover)', color: 'var(--dsw-alias-label-tertiary)',
+  fontSize: 13, cursor: 'default',
+}
+const installedTagStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', padding: '2px 8px',
+  borderRadius: 999, fontSize: 11, lineHeight: '16px',
+  background: 'var(--dsw-alias-interactive-bg-hover)', color: 'var(--dsw-alias-label-secondary)',
+  whiteSpace: 'nowrap',
+}
 const paginationStyle: React.CSSProperties = {
   flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14,
   padding: '10px 14px', borderTop: '1px solid var(--dsw-alias-border-l2)',
@@ -159,8 +171,21 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const [confirming, setConfirming] = useState<MarketPlugin | null>(null)
   const [foregroundId, setForegroundId] = useState<string | null>(null)
   const jobs = useInstallJobs()
+  const [installed, setInstalled] = useState<readonly InstalledPlugin[]>([])
+  const refreshedDone = useRef(new Set<string>())
 
   useEffect(() => { ensureSpinKeyframe() }, [])
+  useEffect(() => {
+    void fetchInstalled().then(setInstalled, () => {})
+  }, [])
+  useEffect(() => {
+    for (const job of jobs) {
+      if (job.status === 'done' && !refreshedDone.current.has(job.id)) {
+        refreshedDone.current.add(job.id)
+        void fetchInstalled().then(setInstalled, () => {})
+      }
+    }
+  }, [jobs])
 
   const foreground = jobs.find(job => job.id === foregroundId) ?? null
   const elapsed = useElapsed(foreground?.startedAt ?? Date.now(), foreground?.status === 'running')
@@ -188,6 +213,11 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
 
   const stop = (event: MouseEvent): void => { event.stopPropagation() }
 
+  const installedInfo = (plugin: MarketPlugin): InstalledPlugin | undefined => installed.find(item =>
+    (item.repo !== undefined && item.repo.toLowerCase() === plugin.fullName.toLowerCase())
+    || item.name.toLowerCase() === plugin.name.toLowerCase(),
+  )
+
   const onConfirmInstall = async (plugin: MarketPlugin): Promise<void> => {
     const source = `github:${plugin.fullName}`
     setConfirming(null)
@@ -197,6 +227,9 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
 
   const page = view.status === 'ready' ? view.page : 1
   const totalPages = view.status === 'ready' ? Math.max(1, Math.ceil(view.totalCount / PER_PAGE)) : 1
+  const sortedPlugins = view.status === 'ready'
+    ? [...view.plugins].sort((a, b) => Number(installedInfo(b) !== undefined) - Number(installedInfo(a) !== undefined))
+    : []
 
   return (
     <>
@@ -229,35 +262,45 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
           : null}
         {view.status === 'ready' && view.plugins.length > 0 ? (
           <ul style={cardsStyle}>
-            {view.plugins.map(plugin => (
-              <li style={cardStyle} key={plugin.fullName} data-market-plugin={plugin.fullName}>
-                <div style={cardBodyStyle}>
-                  <a
-                    style={cardNameStyle}
-                    href={plugin.htmlUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    aria-label={t('open.aria', { name: plugin.fullName })}
-                  >
-                    <span style={cardNameTextStyle}>{plugin.fullName}</span>
-                    <IconRightUpOutline16 size={12} />
-                  </a>
-                  <p style={cardDescStyle}>{plugin.description}</p>
-                </div>
-                <div style={cardTrailingStyle}>
-                  <span style={starsStyle}>
-                    <span style={starGlyphStyle} aria-hidden>★</span>
-                    {plugin.stars}
-                  </span>
-                  <button
-                    type="button"
-                    style={installButtonStyle}
-                    data-market-install={plugin.fullName}
-                    onClick={() => { setConfirming(plugin) }}
-                  >{t('install')}</button>
-                </div>
-              </li>
-            ))}
+            {sortedPlugins.map(plugin => {
+              const info = installedInfo(plugin)
+              return (
+                <li style={cardStyle} key={plugin.fullName} data-market-plugin={plugin.fullName}>
+                  <div style={cardBodyStyle}>
+                    <a
+                      style={cardNameStyle}
+                      href={plugin.htmlUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      aria-label={t('open.aria', { name: plugin.fullName })}
+                    >
+                      <span style={cardNameTextStyle}>{plugin.fullName}</span>
+                      <IconRightUpOutline16 size={12} />
+                    </a>
+                    <p style={cardDescStyle}>{plugin.description}</p>
+                  </div>
+                  <div style={cardTrailingStyle}>
+                    {info !== undefined ? (
+                      <span style={installedTagStyle}>{t('installed')}{info.version !== '' ? ` v${info.version}` : ''}</span>
+                    ) : null}
+                    <span style={starsStyle}>
+                      <span style={starGlyphStyle} aria-hidden>★</span>
+                      {plugin.stars}
+                    </span>
+                    {info !== undefined ? (
+                      <button type="button" disabled style={installedButtonStyle}>{t('installed')}</button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={installButtonStyle}
+                        data-market-install={plugin.fullName}
+                        onClick={() => { setConfirming(plugin) }}
+                      >{t('install')}</button>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         ) : null}
       </div>

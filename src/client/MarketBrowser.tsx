@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { IconLoadingOutline16, IconRightUpOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlugin, type PluginType } from './github.ts'
+import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlugin, type MarketSort, type PluginCategory, type PluginType } from './github.ts'
 import { fetchInstalled, type InstalledPlugin } from './api.ts'
 import {
   backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
@@ -126,6 +126,31 @@ const guideStyle: React.CSSProperties = {
   flexShrink: 0, fontSize: 13, color: 'var(--dsw-alias-state-business-primary, #4c8dff)',
   textDecoration: 'none', whiteSpace: 'nowrap',
 }
+const filterRowStyle: React.CSSProperties = {
+  flex: 'none', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, padding: '8px 14px 0',
+}
+const chipStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px',
+  border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 999,
+  background: 'transparent', color: 'var(--dsw-alias-label-secondary)',
+  fontSize: 12, cursor: 'pointer',
+}
+const chipActiveStyle: React.CSSProperties = {
+  borderColor: 'transparent',
+  background: 'var(--dsw-alias-action-primary, #4c8dff)', color: '#fff',
+}
+const chipCountStyle: React.CSSProperties = { opacity: 0.7, fontVariantNumeric: 'tabular-nums' }
+const sortButtonStyle: React.CSSProperties = {
+  padding: '3px 8px', border: '1px solid transparent', borderRadius: 6,
+  background: 'transparent', color: 'var(--dsw-alias-label-tertiary)', fontSize: 12, cursor: 'pointer',
+}
+const sortActiveStyle: React.CSSProperties = {
+  borderColor: 'var(--dsw-alias-border-l2)',
+  color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-interactive-bg-hover)',
+}
+
+/** Category chips, in display order. */
+const CATEGORIES: readonly PluginCategory[] = ['all', 'plugin', 'skill', 'preset', 'script', 'other']
 
 /* ---- install confirm / progress dialogs ---- */
 const dialogBackdropStyle: React.CSSProperties = {
@@ -226,6 +251,8 @@ function installCommand(job: InstallJob, profile: string): string {
 export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const [view, setView] = useState<View>({ status: 'idle' })
   const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<PluginCategory>('all')
+  const [sort, setSort] = useState<MarketSort>('stars')
   const [confirming, setConfirming] = useState<MarketPlugin | null>(null)
   const [foregroundId, setForegroundId] = useState<string | null>(null)
   const jobs = useInstallJobs()
@@ -263,7 +290,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
 
   const load = (page: number, search: string): void => {
     setView({ status: 'loading' })
-    void fetchMarketPage(page, PER_PAGE, search).then(
+    void fetchMarketPage(page, PER_PAGE, search, category, sort).then(
       result => setView({ status: 'ready', plugins: result.items, totalCount: result.totalCount, page }),
       (error: unknown) => setView({
         status: 'error',
@@ -280,7 +307,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   useEffect(() => {
     const timer = window.setTimeout(() => { load(1, query.trim()) }, 400)
     return () => { window.clearTimeout(timer) }
-  }, [query])
+  }, [query, category, sort])
 
   const stop = (event: MouseEvent): void => { event.stopPropagation() }
 
@@ -306,6 +333,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
 
   const page = view.status === 'ready' ? view.page : 1
   const totalPages = view.status === 'ready' ? Math.max(1, Math.ceil(view.totalCount / PER_PAGE)) : 1
+  const counts = view.status === 'ready' ? view.counts : undefined
   const sortedPlugins = view.status === 'ready'
     ? [...view.plugins].sort((a, b) => Number(installedInfo(b) !== undefined) - Number(installedInfo(a) !== undefined))
     : []
@@ -326,6 +354,28 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
         </label>
         <button type="button" style={actionButtonStyle} onClick={() => { invalidateRegistry(); load(1, query.trim()) }}>{t('refresh')}</button>
         <a style={guideStyle} href={GUIDE_URL} target="_blank" rel="noreferrer noopener">{t('guide')}</a>
+      </div>
+
+      <div style={filterRowStyle}>
+        {CATEGORIES.map(cat => {
+          const count = counts?.[cat] ?? 0
+          if (cat !== 'all' && count === 0) return null
+          const label = cat === 'all' ? t('category.all') : (typeLabel(cat as PluginType, t) ?? t('type.other'))
+          return (
+            <button
+              key={cat}
+              type="button"
+              style={{ ...chipStyle, ...(category === cat ? chipActiveStyle : {}) }}
+              onClick={() => { setCategory(cat) }}
+            >
+              {label}
+              <span style={chipCountStyle}>{count}</span>
+            </button>
+          )
+        })}
+        <span style={{ flex: 1 }} />
+        <button type="button" style={{ ...sortButtonStyle, ...(sort === 'stars' ? sortActiveStyle : {}) }} onClick={() => { setSort('stars') }}>{t('sort.stars')}</button>
+        <button type="button" style={{ ...sortButtonStyle, ...(sort === 'updated' ? sortActiveStyle : {}) }} onClick={() => { setSort('updated') }}>{t('sort.updated')}</button>
       </div>
 
       <div style={bodyStyle}>

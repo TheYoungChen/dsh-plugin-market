@@ -1,18 +1,24 @@
 /**
- * Builds `registry.json`: a full snapshot of the GitHub `dsh-plugin` topic,
- * annotated with each repo's install kind (plugin / skill / preset / script).
+ * Builds `registry.json`: the FULL GitHub `dsh-plugin` topic snapshot, annotated
+ * with each repo's install kind (plugin / skill / preset / script).
  *
- * Runs in GitHub Actions (schedule) with GITHUB_TOKEN. Repo file listings come
- * from the jsDelivr data API (no GitHub rate limits); the GitHub contents API
- * is the fallback when a repo has never been served by jsDelivr.
+ * GitHub search caps every single query at 1000 results, so the topic is
+ * partitioned by disjoint star ranges — each range stays well under the cap and
+ * together they cover every repo. Runs in GitHub Actions (schedule) with
+ * GITHUB_TOKEN; repo file listings come from the jsDelivr data API (no GitHub
+ * rate limits), with the GitHub contents API as the fallback.
  */
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const EXCLUDED = new Set(['deepseek-ai/deepseek-harness'])
 const PER_PAGE = 100
-const MAX_PAGES = 10 // GitHub search caps at 1000 results; the star-sorted head is the registry
+const MAX_PAGES = 10 // per range; each range fits well under the 1000 cap
 const CONCURRENCY = 8
+const PAGE_DELAY_MS = 7000 // unauthenticated search limit is 10/min
+
+/** Disjoint star ranges whose union covers every repo in the topic. */
+const STAR_RANGES = ['stars:0..4', 'stars:5..9', 'stars:10..49', 'stars:50..199', 'stars:200..999', 'stars:>=1000']
 
 const token = process.env.GITHUB_TOKEN?.trim()
 const headers = {
@@ -22,29 +28,44 @@ const headers = {
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
-async function fetchPage(page, retries = 3) {
-  for (let attempt = 0; ; attempt++) {
+async function fetchRange(rangeQuery) {
+  const found = []
+  for (let page = 1; page <= MAX_PAGES; page++) {
     const params = new URLSearchParams({
-      q: 'topic:dsh-plugin',
+      q: `topic:dsh-plugin ${rangeQuery}`,
       sort: 'stars',
       order: 'desc',
       per_page: String(PER_PAGE),
       page: String(page),
     })
-    const response = await fetch(`https://api.github.com/search/repositories?${params.toString()}`, { headers })
-    if (response.status === 403 && attempt < retries) {
+    let response = await fetch(`https://api.github.com/search/repositories?${params.toString()}`, { headers })
+    if (response.status === 403) {
       const reset = Number(response.headers.get('x-ratelimit-reset') ?? 0) * 1000
       const waitMs = Math.max(0, reset - Date.now()) + 1000
-      console.log(`rate limited on page ${page}, waiting ${Math.round(waitMs / 1000)}s`)
+      console.log(`rate limited on ${rangeQuery} page ${page}, waiting ${Math.round(waitMs / 1000)}s`)
       await delay(waitMs)
-      continue
+      response = await fetch(`https://api.github.com/search/repositories?${params.toString()}`, { headers })
     }
     if (!response.ok) {
-      throw new Error(`search failed: ${response.status} ${response.statusText}`)
+      throw new Error(`search failed: ${response.status} ${response.statusText} (${rangeQuery} page ${page})`)
     }
     const payload = await response.json()
-    return { items: payload.items ?? [] }
+    const items = payload.items ?? []
+    for (const item of items) {
+      if (item.full_name === undefined || EXCLUDED.has(item.full_name)) continue
+      found.push({
+        fullName: item.full_name,
+        name: item.name ?? '',
+        description: item.description ?? '',
+        stars: item.stargazers_count ?? 0,
+        htmlUrl: item.html_url ?? '',
+        updatedAt: item.pushed_at ?? item.updated_at ?? '',
+      })
+    }
+    if (items.length < PER_PAGE) break
+    await delay(PAGE_DELAY_MS)
   }
+  return found
 }
 
 /** Map a root file listing to an install kind. */
@@ -87,33 +108,26 @@ async function detectTypeFor(fullName) {
   return detectType(await rootFiles(fullName))
 }
 
-const plugins = []
-for (let page = 1; page <= MAX_PAGES; page++) {
-  const { items } = await fetchPage(page)
-  for (const item of items) {
-    if (item.full_name === undefined || EXCLUDED.has(item.full_name)) continue
-    plugins.push({
-      fullName: item.full_name,
-      name: item.name ?? '',
-      description: item.description ?? '',
-      stars: item.stargazers_count ?? 0,
-      htmlUrl: item.html_url ?? '',
-    })
-  }
-  if (items.length < PER_PAGE) break
-  await delay(7000) // stay under the search API rate limit
-}
-
-// The market always lists itself, even when the star-sorted head overflows the
-// 1000-result search cap.
+// The market always lists itself, even if it ever falls outside the snapshot.
 const SELF = {
   fullName: 'TheYoungChen/dsh-plugin-market',
   name: 'dsh-plugin-market',
   description: 'DeepSeek Harness plugin market - browse, search & install dsh-plugin topic plugins',
   stars: 1,
   htmlUrl: 'https://github.com/TheYoungChen/dsh-plugin-market',
+  updatedAt: '',
 }
-if (!plugins.some(plugin => plugin.fullName === SELF.fullName)) plugins.push(SELF)
+
+const plugins = []
+const seen = new Set()
+for (const range of STAR_RANGES) {
+  for (const plugin of await fetchRange(range)) {
+    if (seen.has(plugin.fullName)) continue
+    seen.add(plugin.fullName)
+    plugins.push(plugin)
+  }
+}
+if (!seen.has(SELF.fullName)) plugins.push(SELF)
 
 let cursor = 0
 async function worker() {

@@ -2,6 +2,10 @@
 
 /** Installable extension kinds, detected from each repo's root files. */
 export type PluginType = 'plugin' | 'skill' | 'preset' | 'script' | 'other'
+/** Category filter: everything, or one install kind. */
+export type PluginCategory = 'all' | PluginType
+/** Sort order for the market list. */
+export type MarketSort = 'stars' | 'updated'
 
 /** One discoverable plugin repository. */
 export interface MarketPlugin {
@@ -15,6 +19,8 @@ export interface MarketPlugin {
   stars: number
   /** Browser URL of the repository. */
   htmlUrl: string
+  /** Last push timestamp (ISO), for the "latest" sort. */
+  updatedAt?: string
   /** Detected install kind, when the registry knows it. */
   type?: PluginType
 }
@@ -23,6 +29,8 @@ export interface MarketPlugin {
 export interface MarketPage {
   items: MarketPlugin[]
   totalCount: number
+  /** Category tally over the full registry (not search-filtered). */
+  counts: Record<string, number>
 }
 
 /** Repos tagged `dsh-plugin` that are not the harness itself. */
@@ -37,16 +45,20 @@ interface RawItem {
   description?: string | null
   stargazers_count?: number
   html_url?: string
+  pushed_at?: string | null
+  updated_at?: string | null
   type?: PluginType
 }
 
 function toPlugin(item: RawItem): MarketPlugin {
+  const updatedAt = item.pushed_at ?? item.updated_at ?? ''
   return {
     fullName: item.full_name ?? '',
     name: item.name ?? '',
     description: item.description ?? '',
     stars: item.stargazers_count ?? 0,
     htmlUrl: item.html_url ?? '',
+    ...(updatedAt !== '' ? { updatedAt } : {}),
     ...(item.type !== undefined ? { type: item.type } : {}),
   }
 }
@@ -135,17 +147,37 @@ function matches(item: MarketPlugin, term: string): boolean {
  * Fetch one page of the market. Prefers the static registry (CDN), falling back
  * to the GitHub search API. With the registry the whole list is fetched once and
  * then filtered/sorted/paginated locally — no API rate limits.
+ * @param category - filter by install kind ('all' shows everything).
+ * @param sort - 'stars' (most popular) or 'updated' (most recent push).
  */
-export async function fetchMarketPage(page: number, perPage: number, search = ''): Promise<MarketPage> {
+export async function fetchMarketPage(
+  page: number,
+  perPage: number,
+  search = '',
+  category: PluginCategory = 'all',
+  sort: MarketSort = 'stars',
+): Promise<MarketPage> {
   try {
     const registry = await fetchRegistry()
-    const term = search.trim()
-    const filtered = term.length === 0 ? registry.items : registry.items.filter(item => matches(item, term))
-    const sorted = [...filtered].sort((a, b) => b.stars - a.stars)
+    const counts: Record<string, number> = { all: registry.items.length }
+    for (const item of registry.items) {
+      const key = item.type ?? 'other'
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    const term = search.trim().toLowerCase()
+    const filtered = registry.items.filter(item => {
+      if (category !== 'all' && (item.type ?? 'other') !== category) return false
+      return term.length === 0 || matches(item, term)
+    })
+    const sorted = [...filtered].sort((a, b) => {
+      if (sort === 'updated') return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
+      return b.stars - a.stars
+    })
     const start = (page - 1) * perPage
-    return { items: sorted.slice(start, start + perPage), totalCount: sorted.length }
+    return { items: sorted.slice(start, start + perPage), totalCount: sorted.length, counts }
   } catch {
-    return searchApi(page, perPage, search)
+    const fallback = await searchApi(page, perPage, search)
+    return { ...fallback, counts: { all: fallback.totalCount } }
   }
 }
 

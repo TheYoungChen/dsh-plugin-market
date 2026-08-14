@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import { IconLoadingOutline16, IconRightUpOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlugin, type MarketSort, type PluginCategory, type PluginType } from './github.ts'
-import { fetchInstalled, type InstalledPlugin } from './api.ts'
+import { cleanupInstall, fetchInstalled, type InstalledPlugin } from './api.ts'
 import {
   backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
   useInstallJobs, type InstallJob,
@@ -331,6 +331,20 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
     setForegroundId(id)
   }
 
+  const cleanupInstallEntry = async (info: InstalledPlugin): Promise<void> => {
+    try {
+      await cleanupInstall(info.name)
+    } catch {
+      // The refresh below reflects the real state either way.
+    }
+    try {
+      const fresh = await fetchInstalled()
+      setInstalled(fresh)
+    } catch {
+      // Ignore a refresh failure; the list stays as-is.
+    }
+  }
+
   const page = view.status === 'ready' ? view.page : 1
   const totalPages = view.status === 'ready' ? Math.max(1, Math.ceil(view.totalCount / PER_PAGE)) : 1
   const counts = view.status === 'ready' ? view.counts : undefined
@@ -415,18 +429,24 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
                   </div>
                   <div style={cardTrailingStyle}>
                     {info !== undefined ? (
-                      <span style={installedTagStyle}>
-                        {isUpdate(plugin) && latestVersions[plugin.fullName] !== undefined
-                          ? `v${info.version} → v${latestVersions[plugin.fullName]}`
-                          : t('installed') + (info.version !== '' ? ` v${info.version}` : '')}
-                      </span>
+                      info.broken ? (
+                        <span style={{ ...installedTagStyle, color: 'var(--dsw-alias-state-error-primary)' }}>{t('broken')}</span>
+                      ) : (
+                        <span style={installedTagStyle}>
+                          {isUpdate(plugin) && latestVersions[plugin.fullName] !== undefined
+                            ? `v${info.version} → v${latestVersions[plugin.fullName]}`
+                            : t('installed') + (info.version !== '' ? ` v${info.version}` : '')}
+                        </span>
+                      )
                     ) : null}
                     <span style={starsStyle}>
                       <span style={starGlyphStyle} aria-hidden>★</span>
                       {plugin.stars}
                     </span>
                     {info !== undefined ? (
-                      isUpdate(plugin) ? (
+                      info.broken ? (
+                        <button type="button" style={dangerButtonStyle} onClick={() => { void cleanupInstallEntry(info) }}>{t('cleanup')}</button>
+                      ) : isUpdate(plugin) ? (
                         <button
                           type="button"
                           style={installButtonStyle}

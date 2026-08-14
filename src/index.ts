@@ -78,6 +78,8 @@ interface InstalledPlugin {
   version: string
   /** Normalized `owner/repo`, when the package declares a GitHub repository. */
   repo?: string
+  /** True when declared in the profile but not resolvable in node_modules. */
+  broken: boolean
 }
 
 /** Normalize a package `repository` field to `owner/repo`, if it is GitHub. */
@@ -100,6 +102,7 @@ function listInstalledPlugins(): InstalledPlugin[] {
   const manifest = readProfileManifest()
   const result: InstalledPlugin[] = []
   for (const name of Object.keys(manifest.dependencies ?? {})) {
+    const spec = manifest.dependencies?.[name] ?? ''
     try {
       const pkg = JSON.parse(readFileSync(
         join(profileWebDir(), 'node_modules', name, 'package.json'),
@@ -109,12 +112,34 @@ function listInstalledPlugins(): InstalledPlugin[] {
         name: pkg.name ?? name,
         version: pkg.version ?? '',
         repo: normalizeRepo(pkg.repository),
+        broken: false,
       })
     } catch {
-      // Not resolvable to a package.json — not a plugin we can match.
+      // Declared in the manifest but not resolvable: a broken install that
+      // would fail dsh boot. Derive the repo from the github: spec when we can.
+      const githubSpec = /^github:([^/]+\/[^/]+)$/.exec(spec)
+      result.push({
+        name,
+        version: '',
+        repo: githubSpec !== null ? githubSpec[1]!.toLowerCase() : undefined,
+        broken: true,
+      })
     }
   }
   return result
+}
+
+/** Remove a dependency (and its bundle entry) from the web profile manifest. */
+function cleanupPlugin(name: string): string[] {
+  const manifest = readProfileManifest()
+  const deps = { ...(manifest.dependencies ?? {}) }
+  delete deps[name]
+  manifest.dependencies = deps
+  const bundles = [...(manifest.dsh?.profile?.bundles ?? [])]
+  const without = bundles.filter(bundle => bundle !== name)
+  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: without } }
+  writeProfileManifest(manifest)
+  return bundles.length === without.length ? [] : [name]
 }
 
 interface InstallJob {
@@ -265,6 +290,28 @@ export function apply(ctx: Context): void {
 
             runSteps(job, steps, 0)
             json(202, { ok: true, jobId })
+          })
+          return
+        }
+
+        if (method === 'POST' && (path === '/api/plugin-market/cleanup' || path === '/api/plugin-market/cleanup/')) {
+          let body = ''
+          req.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
+          req.on('end', () => {
+            let parsed: { name?: string }
+            try {
+              parsed = JSON.parse(body) as { name?: string }
+            } catch {
+              json(400, { ok: false, message: 'invalid JSON body' })
+              return
+            }
+            const name = (parsed.name ?? '').trim()
+            if (name.length === 0) {
+              json(400, { ok: false, message: 'cleanup needs a name' })
+              return
+            }
+            const bundlesRemoved = cleanupPlugin(name)
+            json(200, { ok: true, bundlesRemoved })
           })
           return
         }

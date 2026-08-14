@@ -54,6 +54,8 @@ export interface InstalledPlugin {
   version: string
   /** Normalized `owner/repo`, when the package declares a GitHub repository. */
   repo?: string
+  /** True when declared in the profile but not resolvable in node_modules. */
+  broken: boolean
 }
 
 /** List the plugins installed in the web profile (for the "已安装" badge). */
@@ -64,4 +66,17 @@ export async function fetchInstalled(): Promise<InstalledPlugin[]> {
     throw new Error(payload.message ?? `installed fetch failed: ${response.status}`)
   }
   return payload.plugins
+}
+
+/** Remove a broken dependency (and its bundle entry) from the web profile. */
+export async function cleanupInstall(name: string): Promise<void> {
+  const response = await fetch('/api/plugin-market/cleanup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  })
+  const payload = (await response.json()) as { ok?: boolean; message?: string }
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(payload.message ?? `cleanup failed: ${response.status}`)
+  }
 }

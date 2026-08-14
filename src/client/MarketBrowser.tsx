@@ -147,12 +147,12 @@ const chipActiveStyle: React.CSSProperties = {
 }
 const chipCountStyle: React.CSSProperties = { opacity: 0.7, fontVariantNumeric: 'tabular-nums' }
 const sortButtonStyle: React.CSSProperties = {
-  padding: '3px 8px', border: '1px solid transparent', borderRadius: 6,
+  padding: '3px 8px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6,
   background: 'transparent', color: 'var(--dsw-alias-label-tertiary)', fontSize: 12, cursor: 'pointer',
 }
 const sortActiveStyle: React.CSSProperties = {
-  borderColor: 'var(--dsw-alias-border-l2)',
-  color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-interactive-bg-hover)',
+  borderColor: 'transparent',
+  background: 'var(--dsw-alias-action-primary, #4c8dff)', color: '#fff',
 }
 
 /** Category chips, in display order. */

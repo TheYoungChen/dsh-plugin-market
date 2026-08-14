@@ -135,9 +135,19 @@ async function fetchRegistry(): Promise<MarketPage> {
         continue
       }
       const payload = (await response.json()) as { plugins?: RawItem[] }
-      const items = (payload.plugins ?? [])
+      if (!Array.isArray(payload.plugins)) {
+        lastError = new Error('registry response has no plugins list')
+        continue
+      }
+      const items = payload.plugins
         .map(toPlugin)
         .filter(item => item.fullName.length > 0 && !EXCLUDED.has(item.fullName))
+      // Never cache a broken/empty registry: an empty snapshot would show a
+      // permanent "no plugins" state. Treat it as a failure and fall through.
+      if (items.length === 0) {
+        lastError = new Error('registry response is empty')
+        continue
+      }
       registryCache = { items, totalCount: items.length }
       writeStoredRegistry(registryCache)
       return registryCache

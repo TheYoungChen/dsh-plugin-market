@@ -27,7 +27,13 @@ type View =
   | { readonly status: 'idle' }
   | { readonly status: 'loading' }
   | { readonly status: 'error'; readonly message: string }
-  | { readonly status: 'ready'; readonly plugins: MarketPlugin[]; readonly totalCount: number; readonly page: number }
+  | {
+      readonly status: 'ready'
+      readonly plugins: MarketPlugin[]
+      readonly totalCount: number
+      readonly page: number
+      readonly counts: Record<string, number>
+    }
 
 /** Ticking elapsed-seconds display for a live install. */
 function useElapsed(startedAt: number, active: boolean): number {
@@ -291,7 +297,13 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const load = (page: number, search: string): void => {
     setView({ status: 'loading' })
     void fetchMarketPage(page, PER_PAGE, search, category, sort).then(
-      result => setView({ status: 'ready', plugins: result.items, totalCount: result.totalCount, page }),
+      result => setView({
+        status: 'ready',
+        plugins: result.items,
+        totalCount: result.totalCount,
+        page,
+        counts: result.counts,
+      }),
       (error: unknown) => setView({
         status: 'error',
         message: error instanceof Error ? error.message : String(error),

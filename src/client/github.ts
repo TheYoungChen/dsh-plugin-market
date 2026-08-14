@@ -126,7 +126,10 @@ async function fetchRegistry(): Promise<MarketPage> {
   let lastError: unknown = new Error('registry unavailable')
   for (const url of urls) {
     try {
-      const response = await fetchWithTimeout(url, 2500)
+      // Generous timeout: a slow-but-working CDN body must not be aborted and
+      // pushed onto the (rate-limited) search API fallback. localStorage makes
+      // every later load instant anyway.
+      const response = await fetchWithTimeout(url, 10000)
       if (!response.ok) {
         lastError = new Error(`registry ${response.status}`)
         continue

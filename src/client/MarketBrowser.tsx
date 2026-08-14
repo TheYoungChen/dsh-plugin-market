@@ -1,0 +1,321 @@
+/** Shared market browser: search + paginated list + install flow. */
+
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { IconLoadingOutline16, IconRightUpOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { fetchMarketPage, type MarketPlugin } from './github.ts'
+import {
+  backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
+  useInstallJobs, type InstallJob,
+} from './installStore.ts'
+
+/** Repositories fetched per page. */
+const PER_PAGE = 20
+/** The profile the install targets; the web surface boots as `web`. */
+const DEFAULT_PROFILE = 'web'
+/** Official guide for authoring and publishing a plugin. */
+const GUIDE_URL = 'https://github.com/deepseek-ai/deepseek-harness'
+
+type MarketT = PropsLocale<'pluginMarket'>['t']
+
+interface MarketBrowserProps {
+  readonly t: MarketT
+}
+
+type View =
+  | { readonly status: 'idle' }
+  | { readonly status: 'loading' }
+  | { readonly status: 'error'; readonly message: string }
+  | { readonly status: 'ready'; readonly plugins: MarketPlugin[]; readonly totalCount: number; readonly page: number }
+
+/** Ticking elapsed-seconds display for a live install. */
+function useElapsed(startedAt: number, active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active) return
+    const timer = window.setInterval(() => { setNow(Date.now()) }, 1000)
+    return () => { window.clearInterval(timer) }
+  }, [active])
+  return Math.max(0, Math.floor((now - startedAt) / 1000))
+}
+
+/* ---- list chrome ---- */
+const searchStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, padding: '6px 9px',
+  border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, color: 'var(--dsw-alias-label-tertiary)',
+}
+const searchInputStyle: React.CSSProperties = {
+  flex: 1, minWidth: 0, border: 0, background: 'transparent', color: 'var(--dsw-alias-label-primary)',
+  fontSize: 13, outline: 'none', fontFamily: 'inherit',
+}
+const bodyStyle: React.CSSProperties = {
+  flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 14px',
+}
+const statusTextStyle: React.CSSProperties = {
+  padding: '12px 0', margin: 0, color: 'var(--dsw-alias-label-tertiary)', fontSize: 13, lineHeight: '18px',
+}
+const cardsStyle: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', gap: 10, margin: 0, padding: 0, listStyle: 'none',
+}
+const cardStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px',
+  border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12,
+  background: 'var(--dsw-alias-bg-base)',
+}
+const cardBodyStyle: React.CSSProperties = { flex: 1, minWidth: 0 }
+const cardNameStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 14, fontWeight: 600,
+  color: 'var(--dsw-alias-label-primary)', textDecoration: 'none', overflowWrap: 'anywhere',
+}
+const cardNameTextStyle: React.CSSProperties = { overflowWrap: 'anywhere' }
+const cardDescStyle: React.CSSProperties = {
+  margin: '5px 0 0', fontSize: 13, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)',
+  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+}
+const cardTrailingStyle: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0,
+}
+const starsStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12,
+  color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap',
+  fontVariantNumeric: 'tabular-nums',
+}
+const starGlyphStyle: React.CSSProperties = { color: '#e3b341', fontSize: 13, lineHeight: 1 }
+const installButtonStyle: React.CSSProperties = {
+  padding: '5px 12px', border: 0, borderRadius: 8,
+  background: 'var(--dsw-alias-action-primary, #4c8dff)', color: '#fff', fontSize: 13, cursor: 'pointer',
+}
+const paginationStyle: React.CSSProperties = {
+  flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14,
+  padding: '10px 14px', borderTop: '1px solid var(--dsw-alias-border-l2)',
+}
+const pageButtonStyle: React.CSSProperties = {
+  padding: '5px 12px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8,
+  background: 'transparent', color: 'var(--dsw-alias-label-primary)', fontSize: 13, cursor: 'pointer',
+}
+const pageIndicatorStyle: React.CSSProperties = {
+  fontSize: 13, color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums',
+}
+const countStyle: React.CSSProperties = {
+  margin: '0 0 8px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums',
+}
+const guideStyle: React.CSSProperties = {
+  flexShrink: 0, fontSize: 13, color: 'var(--dsw-alias-state-business-primary, #4c8dff)',
+  textDecoration: 'none', whiteSpace: 'nowrap',
+}
+
+/* ---- install confirm / progress dialogs ---- */
+const dialogBackdropStyle: React.CSSProperties = {
+  position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(0,0,0,0.55)',
+}
+const dialogStyle: React.CSSProperties = {
+  width: 'min(520px, calc(100vw - 32px))', padding: 16,
+  border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12,
+  background: 'var(--dsw-alias-bg-base)', color: 'var(--dsw-alias-label-primary)',
+  boxShadow: 'var(--dsw-shadow-lv2)',
+}
+const dialogTitleStyle: React.CSSProperties = { margin: '0 0 8px', fontSize: 14 }
+const dialogBodyStyle: React.CSSProperties = {
+  margin: '0 0 8px', fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere',
+}
+const commandStyle: React.CSSProperties = {
+  display: 'block', padding: '8px 10px', marginBottom: 12, overflowX: 'auto',
+  borderRadius: 6, background: 'rgba(0,0,0,0.3)', fontSize: 12, whiteSpace: 'nowrap',
+}
+const outputStyle: React.CSSProperties = {
+  display: 'block', padding: '8px 10px', margin: '8px 0', maxHeight: 220, overflowY: 'auto',
+  borderRadius: 6, background: 'rgba(0,0,0,0.3)', fontSize: 11, whiteSpace: 'pre-wrap',
+  fontFamily: 'ui-monospace, monospace', wordBreak: 'break-word',
+}
+const runningStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 4px', fontSize: 13,
+  color: 'var(--dsw-alias-label-secondary)',
+}
+const spinStyle: React.CSSProperties = { display: 'inline-flex', animation: 'dsh-market-spin 1s linear infinite' }
+const outputLabelStyle: React.CSSProperties = { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' }
+const actionsStyle: React.CSSProperties = { display: 'flex', justifyContent: 'flex-end', gap: 8 }
+const actionButtonStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px',
+  border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 6,
+  background: 'transparent', color: 'inherit', fontSize: 12, cursor: 'pointer', textDecoration: 'none',
+}
+const dangerButtonStyle: React.CSSProperties = { ...actionButtonStyle, color: 'var(--dsw-alias-state-error-primary)' }
+const primaryButtonStyle: React.CSSProperties = {
+  ...actionButtonStyle, borderColor: 'transparent',
+  background: 'var(--dsw-alias-action-primary, #4c8dff)', color: '#fff',
+}
+const errorTextStyle: React.CSSProperties = {
+  margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)',
+}
+const successTextStyle: React.CSSProperties = {
+  margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-success-primary)',
+}
+
+/** The market list, shared by the sidebar modal and the Settings tab. */
+export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
+  const [view, setView] = useState<View>({ status: 'idle' })
+  const [query, setQuery] = useState('')
+  const [confirming, setConfirming] = useState<MarketPlugin | null>(null)
+  const [foregroundId, setForegroundId] = useState<string | null>(null)
+  const jobs = useInstallJobs()
+
+  useEffect(() => { ensureSpinKeyframe() }, [])
+
+  const foreground = jobs.find(job => job.id === foregroundId) ?? null
+  const elapsed = useElapsed(foreground?.startedAt ?? Date.now(), foreground?.status === 'running')
+
+  const load = (page: number, search: string): void => {
+    setView({ status: 'loading' })
+    void fetchMarketPage(page, PER_PAGE, search).then(
+      result => setView({ status: 'ready', plugins: result.items, totalCount: result.totalCount, page }),
+      (error: unknown) => setView({
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    )
+  }
+
+  useEffect(() => {
+    if (view.status !== 'idle') return
+    load(1, '')
+  }, [view.status])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { load(1, query.trim()) }, 400)
+    return () => { window.clearTimeout(timer) }
+  }, [query])
+
+  const stop = (event: MouseEvent): void => { event.stopPropagation() }
+
+  const onConfirmInstall = async (plugin: MarketPlugin): Promise<void> => {
+    const source = `github:${plugin.fullName}`
+    setConfirming(null)
+    const id = await beginInstall(plugin.name, source)
+    setForegroundId(id)
+  }
+
+  const page = view.status === 'ready' ? view.page : 1
+  const totalPages = view.status === 'ready' ? Math.max(1, Math.ceil(view.totalCount / PER_PAGE)) : 1
+
+  return (
+    <>
+      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px 0' }}>
+        <label style={{ ...searchStyle, flex: 1 }}>
+          <IconSearchOutline16 aria-hidden="true" />
+          <input
+            type="search"
+            style={searchInputStyle}
+            value={query}
+            placeholder={t('search')}
+            aria-label={t('search')}
+            onChange={event => { setQuery(event.currentTarget.value) }}
+          />
+        </label>
+        <a style={guideStyle} href={GUIDE_URL} target="_blank" rel="noreferrer noopener">{t('guide')}</a>
+      </div>
+
+      <div style={bodyStyle}>
+        {view.status === 'ready' ? <p style={countStyle}>{t('count', { total: view.totalCount })}</p> : null}
+        {view.status === 'loading' ? <p style={statusTextStyle}>{t('loading')}</p> : null}
+        {view.status === 'error' ? (
+          <div role="alert">
+            <p style={errorTextStyle}>{t('error', { message: view.message })}</p>
+            <button type="button" style={actionButtonStyle} onClick={() => { load(page, query.trim()) }}>{t('retry')}</button>
+          </div>
+        ) : null}
+        {view.status === 'ready' && view.plugins.length === 0
+          ? <p style={statusTextStyle}>{t('empty')}</p>
+          : null}
+        {view.status === 'ready' && view.plugins.length > 0 ? (
+          <ul style={cardsStyle}>
+            {view.plugins.map(plugin => (
+              <li style={cardStyle} key={plugin.fullName} data-market-plugin={plugin.fullName}>
+                <div style={cardBodyStyle}>
+                  <a
+                    style={cardNameStyle}
+                    href={plugin.htmlUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    aria-label={t('open.aria', { name: plugin.fullName })}
+                  >
+                    <span style={cardNameTextStyle}>{plugin.fullName}</span>
+                    <IconRightUpOutline16 size={12} />
+                  </a>
+                  <p style={cardDescStyle}>{plugin.description}</p>
+                </div>
+                <div style={cardTrailingStyle}>
+                  <span style={starsStyle}>
+                    <span style={starGlyphStyle} aria-hidden>★</span>
+                    {plugin.stars}
+                  </span>
+                  <button
+                    type="button"
+                    style={installButtonStyle}
+                    data-market-install={plugin.fullName}
+                    onClick={() => { setConfirming(plugin) }}
+                  >{t('install')}</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      {view.status === 'ready' && view.plugins.length > 0 ? (
+        <footer style={paginationStyle}>
+          <button type="button" style={pageButtonStyle} disabled={page <= 1} onClick={() => { load(page - 1, query.trim()) }}>{t('prev')}</button>
+          <span style={pageIndicatorStyle}>{t('page', { page, total: totalPages })}</span>
+          <button type="button" style={pageButtonStyle} disabled={page >= totalPages} onClick={() => { load(page + 1, query.trim()) }}>{t('next')}</button>
+        </footer>
+      ) : null}
+
+      {confirming !== null ? (
+        <div style={dialogBackdropStyle} onClick={() => { setConfirming(null) }}>
+          <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={t('confirm.title', { name: confirming.name })} onClick={stop}>
+            <h3 style={dialogTitleStyle}>{t('confirm.title', { name: confirming.name })}</h3>
+            <p style={dialogBodyStyle}>{t('confirm.body', { source: `github:${confirming.fullName}`, profile: DEFAULT_PROFILE })}</p>
+            <code style={commandStyle}>dsh plugin --profile {DEFAULT_PROFILE} add github:{confirming.fullName}</code>
+            <div style={actionsStyle}>
+              <button type="button" style={actionButtonStyle} onClick={() => { setConfirming(null) }}>{t('confirm.cancel')}</button>
+              <button type="button" style={primaryButtonStyle} onClick={() => { void onConfirmInstall(confirming) }}>{t('confirm.start')}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {foreground !== null ? (
+        <div style={dialogBackdropStyle}>
+          <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={t('installing.title', { name: foreground.name })}>
+            <h3 style={dialogTitleStyle}>{t('installing.title', { name: foreground.name })}</h3>
+            {foreground.status === 'running' ? (
+              <p style={runningStyle}>
+                <span style={spinStyle}><IconLoadingOutline16 /></span>
+                {t('install.running')} {t('install.elapsed', { seconds: elapsed })}
+              </p>
+            ) : null}
+            {foreground.status === 'done' ? <p style={successTextStyle}>{t('installing.done')}</p> : null}
+            {foreground.status === 'error' ? <p style={errorTextStyle}>{t('installing.failed')}</p> : null}
+            {foreground.status === 'canceled' ? <p style={errorTextStyle}>{t('install.canceled')}</p> : null}
+            {foreground.output.length > 0 ? (
+              <>
+                <span style={outputLabelStyle}>{t('installing.output')}</span>
+                <code style={outputStyle}>{foreground.output}</code>
+              </>
+            ) : null}
+            <div style={actionsStyle}>
+              {foreground.status === 'running' ? (
+                <>
+                  <button type="button" style={dangerButtonStyle} onClick={() => { void cancelJob(foreground.id) }}>{t('install.terminate')}</button>
+                  <button type="button" style={primaryButtonStyle} onClick={() => { backgroundJob(foreground.id); setForegroundId(null) }}>{t('install.background')}</button>
+                </>
+              ) : (
+                <button type="button" style={primaryButtonStyle} onClick={() => { dismissJob(foreground.id); setForegroundId(null) }}>{t('installing.close')}</button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}

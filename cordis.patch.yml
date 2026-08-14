@@ -1,0 +1,10 @@
+# dsh-plugin-market bundle patch: the "plugin market" browser surface.
+# Applied after the profile's earlier bundle layers (dsh-base, dsh-web-app).
+#
+# A single `dsh.client` row registers the browser plugin. The node half is an
+# empty apply (pure UI plugin); the browser half ships via the package's
+# `dsh.client` manifest and `./client` export, served by dsh-client-modules.
+
+- insert:
+    - id: ui-plugin-market
+      name: 'dsh-plugin-market'

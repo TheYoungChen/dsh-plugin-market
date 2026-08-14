@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { IconLoadingOutline16, IconRightUpOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlugin } from './github.ts'
+import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlugin, type PluginType } from './github.ts'
 import { fetchInstalled, type InstalledPlugin } from './api.ts'
 import {
   backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
@@ -97,6 +97,17 @@ const installedTagStyle: React.CSSProperties = {
   background: 'var(--dsw-alias-interactive-bg-hover)', color: 'var(--dsw-alias-label-secondary)',
   whiteSpace: 'nowrap',
 }
+const typeBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', marginLeft: 8, padding: '1px 7px',
+  borderRadius: 999, fontSize: 11, lineHeight: '16px',
+  border: '1px solid currentColor', background: 'transparent', whiteSpace: 'nowrap',
+}
+const typeBadgeColors: Record<Exclude<PluginType, 'other'>, string> = {
+  plugin: 'var(--dsw-alias-state-business-primary, #4c8dff)',
+  skill: 'var(--dsw-alias-state-success-primary, #2f9e6e)',
+  preset: '#8b5cf6',
+  script: 'var(--dsw-alias-state-warning-primary, #d97706)',
+}
 const paginationStyle: React.CSSProperties = {
   flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14,
   padding: '10px 14px', borderTop: '1px solid var(--dsw-alias-border-l2)',
@@ -168,6 +179,47 @@ const successTextStyle: React.CSSProperties = {
 function versionDiffers(a: string, b: string): boolean {
   const norm = (value: string): string => value.replace(/^v/, '')
   return norm(a) !== norm(b)
+}
+
+/** Install-kind label for the type badge. */
+function typeLabel(type: PluginType | undefined, t: MarketT): string | null {
+  switch (type) {
+    case 'plugin': return t('type.plugin')
+    case 'skill': return t('type.skill')
+    case 'preset': return t('type.preset')
+    case 'script': return t('type.script')
+    default: return null
+  }
+}
+
+/** Confirm-dialog body key for an install kind. */
+function confirmBodyKey(type: PluginType | undefined): 'confirm.body.plugin' | 'confirm.body.skill' | 'confirm.body.preset' | 'confirm.body.script' {
+  return type === 'skill' ? 'confirm.body.skill'
+    : type === 'preset' ? 'confirm.body.preset'
+      : type === 'script' ? 'confirm.body.script'
+        : 'confirm.body.plugin'
+}
+
+/** User-facing command for the confirm dialog, per install kind. */
+function confirmCommand(plugin: MarketPlugin, profile: string): string {
+  const repo = plugin.fullName
+  switch (plugin.type ?? 'plugin') {
+    case 'skill': return `git clone --depth 1 https://github.com/${repo}.git ~/.dsh/skills/${plugin.name}`
+    case 'preset': return `git clone --depth 1 https://github.com/${repo}.git ~/.dsh/.agent-presets/${plugin.name}`
+    case 'script': return `git clone --depth 1 https://github.com/${repo}.git && 运行仓库内 install 脚本`
+    default: return `dsh plugin --profile ${profile} add github:${repo}`
+  }
+}
+
+/** Actual command shown on the live install dialog, per install kind. */
+function installCommand(job: InstallJob, profile: string): string {
+  const fullName = job.source.replace(/^github:/, '')
+  switch (job.type) {
+    case 'skill': return `git clone --depth 1 https://github.com/${fullName}.git ~/.dsh/skills/${job.name}`
+    case 'preset': return `git clone --depth 1 https://github.com/${fullName}.git ~/.dsh/.agent-presets/${job.name}`
+    case 'script': return `git clone --depth 1 https://github.com/${fullName}.git && 运行仓库内 install 脚本`
+    default: return `pnpm add ${job.source}`
+  }
 }
 
 /** The market list, shared by the sidebar modal and the Settings tab. */
@@ -246,8 +298,9 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
 
   const onConfirmInstall = async (plugin: MarketPlugin): Promise<void> => {
     const source = `github:${plugin.fullName}`
+    const type = plugin.type ?? 'plugin'
     setConfirming(null)
-    const id = await beginInstall(plugin.name, source)
+    const id = await beginInstall(plugin.name, source, type)
     setForegroundId(id)
   }
 
@@ -291,6 +344,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
           <ul style={cardsStyle}>
             {sortedPlugins.map(plugin => {
               const info = installedInfo(plugin)
+              const badge = typeLabel(plugin.type, t)
               return (
                 <li style={cardStyle} key={plugin.fullName} data-market-plugin={plugin.fullName}>
                   <div style={cardBodyStyle}>
@@ -304,6 +358,9 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
                       <span style={cardNameTextStyle}>{plugin.fullName}</span>
                       <IconRightUpOutline16 size={12} />
                     </a>
+                    {badge !== null ? (
+                      <span style={{ ...typeBadgeStyle, color: typeBadgeColors[plugin.type as Exclude<PluginType, 'other'>] }}>{badge}</span>
+                    ) : null}
                     <p style={cardDescStyle}>{plugin.description}</p>
                   </div>
                   <div style={cardTrailingStyle}>
@@ -357,8 +414,9 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
         <div style={dialogBackdropStyle} onClick={() => { setConfirming(null) }}>
           <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={isUpdate(confirming) ? t('confirm.title.update', { name: confirming.name }) : t('confirm.title', { name: confirming.name })} onClick={stop}>
             <h3 style={dialogTitleStyle}>{isUpdate(confirming) ? t('confirm.title.update', { name: confirming.name }) : t('confirm.title', { name: confirming.name })}</h3>
-            <p style={dialogBodyStyle}>{t('confirm.body', { source: `github:${confirming.fullName}`, profile: DEFAULT_PROFILE })}</p>
-            <code style={commandStyle}>dsh plugin --profile {DEFAULT_PROFILE} add github:{confirming.fullName}</code>
+            <p style={dialogBodyStyle}>{t(confirmBodyKey(confirming.type), { source: `github:${confirming.fullName}`, profile: DEFAULT_PROFILE, name: confirming.name })}</p>
+            <code style={commandStyle}>{confirmCommand(confirming, DEFAULT_PROFILE)}</code>
+            {confirming.type === 'script' ? <p style={errorTextStyle}>{t('confirm.scriptWarning')}</p> : null}
             <div style={actionsStyle}>
               <button type="button" style={actionButtonStyle} onClick={() => { setConfirming(null) }}>{t('confirm.cancel')}</button>
               <button type="button" style={primaryButtonStyle} onClick={() => { void onConfirmInstall(confirming) }}>{t('confirm.start')}</button>
@@ -371,7 +429,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
         <div style={dialogBackdropStyle}>
           <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={t('installing.title', { name: foreground.name })}>
             <h3 style={dialogTitleStyle}>{t('installing.title', { name: foreground.name })}</h3>
-            <code style={commandStyle}>pnpm add {foreground.source}</code>
+            <code style={commandStyle}>{installCommand(foreground, DEFAULT_PROFILE)}</code>
             {foreground.status === 'running' ? (
               <p style={runningStyle}>
                 <span style={spinStyle}><IconLoadingOutline16 /></span>

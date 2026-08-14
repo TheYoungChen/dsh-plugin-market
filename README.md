@@ -36,9 +36,20 @@ dsh plugin --profile web add github:TheYoungChen/dsh-plugin-market && dsh web
 - **静态索引 + CDN**：数据优先来自 GitHub Action 每 2 小时生成的 `registry.json`（jsDelivr CDN 分发，国内快），终端零 API 调用、零限流；索引不可用时自动回退搜索 API
 - **已安装识别 + 更新**：读 profile 真实依赖 + `repository` 归属校验，已装的插件置顶；自动对比最新版本，有新版显示「更新」按钮，一键覆盖升级
 - **一键安装**：确认框 → 真实执行 `pnpm add github:<owner/repo>`（等价于官方 `dsh plugin add`），自动把声明 `dsh.bundle` 的依赖 reconcile 进 `dsh.profile.bundles` 层栈
-- **安装可视化**：实时日志 + 已用时长，可随时**终止**（真正杀掉 pnpm 进程）或转**后台下载**
-- **后台通知**：右上角常驻状态条，运行中可终止；完成后带「重启并生效」按钮、3 秒自动消失，也可手动关闭
+- **安装可视化**：实时日志 + 已用时长，可随时**终止**（真正杀掉进程）或转**后台下载**
+- **后台通知**：右上角常驻状态条（不遮挡会话页头），运行中可终止、可点击展开为终端面板看实时日志；完成后带「立即重启」按钮，手动关闭
 - **统计与指引**：插件总数统计、「如何发布插件」引导链接
+
+## 安装类型
+
+市场按仓库根文件自动识别类型并打上徽章，安装时走对应方式：
+
+| 类型 | 判定 | 安装方式 |
+|---|---|---|
+| 插件 | 根目录含 `package.json` | `pnpm add` 进 profile（官方路径） |
+| Skill | 根目录含 `SKILL.md` | 克隆到 `~/.dsh/skills/<名>/` |
+| 预设 | `preset.yml` / `agent.cordis.yml` | 克隆到 `~/.dsh/.agent-presets/<名>/` |
+| 脚本 | `install.sh` / `install.ps1` | 克隆后执行安装脚本（需确认信任） |
 
 ## 工作原理
 
@@ -85,3 +96,7 @@ src/client/locales.ts         # 中英文案
 - 静态索引每 2 小时由 CI 更新一次，新发布的插件最迟 2 小时进索引（可在仓库 Actions 里手动触发 `update-registry`）。
 - 版本检测对已安装插件按需读取 GitHub `package.json`，受未鉴权速率限制（约 60 次/小时）。
 - 安装进度为轮询式（~600ms 一次），非逐字节流式。
+
+## License
+
+[MIT](LICENSE) — Copyright (c) 2025 TheYoungChen

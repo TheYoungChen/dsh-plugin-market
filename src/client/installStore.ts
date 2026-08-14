@@ -9,6 +9,8 @@ export interface InstallJob {
   readonly id: string
   readonly name: string
   readonly source: string
+  /** Install kind routing the node half ('plugin' | 'skill' | 'preset' | 'script'). */
+  readonly type: string
   readonly status: InstallStatus
   readonly output: string
   readonly startedAt: number
@@ -71,20 +73,20 @@ async function poll(id: string): Promise<void> {
 }
 
 /** Start an install and return its job id (synthetic on a failed start). */
-export async function beginInstall(name: string, source: string): Promise<string> {
+export async function beginInstall(name: string, source: string, type = 'plugin'): Promise<string> {
   let id: string
   try {
-    id = await startInstall(source)
+    id = await startInstall(source, type)
   } catch (error) {
     id = `error-${Date.now().toString(36)}`
     jobs.set(id, {
-      id, name, source, status: 'error', backgrounded: false, startedAt: Date.now(),
+      id, name, source, type, status: 'error', backgrounded: false, startedAt: Date.now(),
       output: error instanceof Error ? error.message : String(error),
     })
     notify()
     return id
   }
-  jobs.set(id, { id, name, source, status: 'running', output: '', backgrounded: false, startedAt: Date.now() })
+  jobs.set(id, { id, name, source, type, status: 'running', output: '', backgrounded: false, startedAt: Date.now() })
   notify()
   void poll(id)
   return id

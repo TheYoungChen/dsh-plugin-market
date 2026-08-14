@@ -1,5 +1,8 @@
 /** Plugin discovery: static registry (CDN-first) with a GitHub search API fallback. */
 
+/** Installable extension kinds, detected from each repo's root files. */
+export type PluginType = 'plugin' | 'skill' | 'preset' | 'script' | 'other'
+
 /** One discoverable plugin repository. */
 export interface MarketPlugin {
   /** `owner/repo`, also the pnpm `github:` install spec. */
@@ -12,6 +15,8 @@ export interface MarketPlugin {
   stars: number
   /** Browser URL of the repository. */
   htmlUrl: string
+  /** Detected install kind, when the registry knows it. */
+  type?: PluginType
 }
 
 /** One page of the market plus the topic's total repository count. */
@@ -32,6 +37,7 @@ interface RawItem {
   description?: string | null
   stargazers_count?: number
   html_url?: string
+  type?: PluginType
 }
 
 function toPlugin(item: RawItem): MarketPlugin {
@@ -41,6 +47,21 @@ function toPlugin(item: RawItem): MarketPlugin {
     description: item.description ?? '',
     stars: item.stargazers_count ?? 0,
     htmlUrl: item.html_url ?? '',
+    ...(item.type !== undefined ? { type: item.type } : {}),
+  }
+}
+
+/**
+ * Fetch with a hard timeout so a blocked CDN or API never hangs the market;
+ * callers fall back to the next source when this aborts.
+ */
+async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => { controller.abort() }, ms)
+  try {
+    return await fetch(url, { cache: 'no-store', signal: controller.signal })
+  } finally {
+    window.clearTimeout(timer)
   }
 }
 
@@ -62,7 +83,7 @@ async function fetchRegistry(): Promise<MarketPage> {
   let lastError: unknown = new Error('registry unavailable')
   for (const url of urls) {
     try {
-      const response = await fetch(url, { cache: 'no-store' })
+      const response = await fetchWithTimeout(url, 3500)
       if (!response.ok) {
         lastError = new Error(`registry ${response.status}`)
         continue
@@ -80,7 +101,7 @@ async function fetchRegistry(): Promise<MarketPage> {
   throw lastError instanceof Error ? lastError : new Error('registry unavailable')
 }
 
-/* ---- GitHub search API (fallback + registry generation source) ---- */
+/* ---- GitHub search API (fallback) ---- */
 
 async function searchApi(page: number, perPage: number, search: string): Promise<MarketPage> {
   const term = search.trim().length > 0 ? `topic:dsh-plugin ${search.trim()}` : 'topic:dsh-plugin'
@@ -91,9 +112,7 @@ async function searchApi(page: number, perPage: number, search: string): Promise
     per_page: String(perPage),
     page: String(page),
   })
-  const response = await fetch(`https://api.github.com/search/repositories?${params.toString()}`, {
-    headers: { Accept: 'application/vnd.github+json' },
-  })
+  const response = await fetchWithTimeout(`https://api.github.com/search/repositories?${params.toString()}`, 6000)
   if (!response.ok) {
     throw new Error(`GitHub search failed: ${response.status} ${response.statusText}`)
   }
@@ -133,9 +152,7 @@ export async function fetchMarketPage(page: number, perPage: number, search = ''
 /** Fetch the latest `version` from a repo's root package.json (base64 contents API). */
 export async function fetchLatestVersion(fullName: string): Promise<string | undefined> {
   try {
-    const response = await fetch(`https://api.github.com/repos/${fullName}/contents/package.json`, {
-      headers: { Accept: 'application/vnd.github+json' },
-    })
+    const response = await fetchWithTimeout(`https://api.github.com/repos/${fullName}/contents/package.json`, 6000)
     if (!response.ok) return undefined
     const payload = (await response.json()) as { content?: string; encoding?: string }
     if (payload.content === undefined || payload.encoding !== 'base64') return undefined

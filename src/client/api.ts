@@ -11,13 +11,14 @@ export interface InstallJobState {
 /**
  * Start installing one source (`github:owner/repo`).
  * @param source - the pnpm install spec.
+ * @param type - the detected install kind; routes the node half.
  * @returns the job id to poll.
  */
-export async function startInstall(source: string): Promise<string> {
+export async function startInstall(source: string, type = 'plugin'): Promise<string> {
   const response = await fetch('/api/plugin-market/install', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ source }),
+    body: JSON.stringify({ source, type }),
   })
   const payload = (await response.json()) as { ok?: boolean; jobId?: string; message?: string }
   if (!response.ok || payload.ok !== true || payload.jobId === undefined) {

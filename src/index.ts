@@ -10,7 +10,7 @@
  * panel fetches this route directly, like dsh-external/plugin-console.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -127,6 +127,43 @@ interface InstallJob {
 
 const jobs = new Map<string, InstallJob>()
 
+/** Run install steps sequentially, streaming each process into the job. */
+function runSteps(job: InstallJob, steps: Array<{ argv: string[]; cwd: string }>, index: number): void {
+  if (index >= steps.length) {
+    try {
+      job.joined = reconcileBundles()
+    } catch (error) {
+      job.output += `\nreconcile failed: ${error instanceof Error ? error.message : String(error)}`
+    }
+    job.status = 'done'
+    return
+  }
+  const step = steps[index]!
+  const child = spawn(step.argv[0]!, step.argv.slice(1), {
+    cwd: step.cwd,
+    shell: process.platform === 'win32',
+  })
+  job.child = child
+  child.stdout?.on('data', (chunk: Buffer) => { job.output += chunk.toString('utf8') })
+  child.stderr?.on('data', (chunk: Buffer) => { job.output += chunk.toString('utf8') })
+  child.on('error', (error: Error) => {
+    job.status = 'error'
+    job.output += `\n${error.message}`
+  })
+  child.on('close', (code: number | null) => {
+    if (job.status === 'canceled') return
+    job.exitCode = code
+    if (code !== 0) {
+      job.status = 'error'
+      if (index === 0 && step.argv[0] === 'pnpm') {
+        job.output += '\nIf pnpm blocked a build script, add the printed key to allowBuilds in the profile pnpm-workspace.yaml, then retry.'
+      }
+      return
+    }
+    runSteps(job, steps, index + 1)
+  })
+}
+
 /** Minimal structural types for the webserver route surface. */
 interface MarketRequest {
   url?: string
@@ -178,9 +215,9 @@ export function apply(ctx: Context): void {
           let body = ''
           req.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
           req.on('end', () => {
-            let parsed: { source?: string }
+            let parsed: { source?: string; type?: string }
             try {
-              parsed = JSON.parse(body) as { source?: string }
+              parsed = JSON.parse(body) as { source?: string; type?: string }
             } catch {
               json(400, { ok: false, message: 'invalid JSON body' })
               return
@@ -190,39 +227,43 @@ export function apply(ctx: Context): void {
               json(400, { ok: false, message: 'install needs a source' })
               return
             }
+            const type = parsed.type === 'skill' || parsed.type === 'preset' || parsed.type === 'script'
+              ? parsed.type
+              : 'plugin'
 
             const jobId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
             const job: InstallJob = { status: 'running', output: '', exitCode: null, joined: [] }
             jobs.set(jobId, job)
 
-            const child = spawn('pnpm', ['add', source], {
-              cwd: profileWebDir(),
-              shell: process.platform === 'win32',
-            })
-            job.child = child
-            child.stdout?.on('data', (chunk: Buffer) => { job.output += chunk.toString('utf8') })
-            child.stderr?.on('data', (chunk: Buffer) => { job.output += chunk.toString('utf8') })
-            child.on('error', (error: Error) => {
-              job.status = 'error'
-              job.output += `\n${error.message}`
-            })
-            child.on('close', (code: number | null) => {
-              if (job.status === 'canceled') return
-              job.exitCode = code
-              if (code === 0) {
-                try {
-                  job.joined = reconcileBundles()
-                } catch (error) {
-                  job.output += `\nreconcile failed: ${error instanceof Error ? error.message : String(error)}`
-                }
-                job.status = 'done'
-              } else {
-                job.status = 'error'
-                if (/^git\+|^github:|\.git(?:#|$)/.test(source)) {
-                  job.output += '\nIf pnpm blocked a build script, add the printed key to allowBuilds in the profile pnpm-workspace.yaml, then retry.'
-                }
-              }
-            })
+            const fullName = source.replace(/^github:/, '')
+            const repoName = fullName.split('/')[1] ?? fullName
+            const cloneUrl = `https://github.com/${fullName}.git`
+
+            const steps: Array<{ argv: string[]; cwd: string }> = []
+            if (type === 'skill') {
+              const skillsDir = join(dshHome(), 'skills')
+              mkdirSync(skillsDir, { recursive: true })
+              steps.push({ argv: ['git', 'clone', '--depth', '1', cloneUrl, join(skillsDir, repoName)], cwd: dshHome() })
+            } else if (type === 'preset') {
+              const presetsDir = join(dshHome(), '.agent-presets')
+              mkdirSync(presetsDir, { recursive: true })
+              steps.push({ argv: ['git', 'clone', '--depth', '1', cloneUrl, join(presetsDir, repoName)], cwd: dshHome() })
+            } else if (type === 'script') {
+              const cacheDir = join(dshHome(), 'marketplace', 'cache')
+              mkdirSync(cacheDir, { recursive: true })
+              steps.push({ argv: ['git', 'clone', '--depth', '1', cloneUrl, join(cacheDir, repoName)], cwd: dshHome() })
+              const script = process.platform === 'win32' ? 'install.ps1' : 'install.sh'
+              steps.push({
+                argv: process.platform === 'win32'
+                  ? ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(cacheDir, repoName, script)]
+                  : ['bash', join(cacheDir, repoName, script)],
+                cwd: join(cacheDir, repoName),
+              })
+            } else {
+              steps.push({ argv: ['pnpm', 'add', source], cwd: profileWebDir() })
+            }
+
+            runSteps(job, steps, 0)
             json(202, { ok: true, jobId })
           })
           return

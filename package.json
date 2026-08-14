@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-market",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "DeepSeek Harness plugin market: browse the dsh-plugin GitHub topic and install plugins from a panel above Settings.",
   "type": "module",
   "main": "lib/index.mjs",

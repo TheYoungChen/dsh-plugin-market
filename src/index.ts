@@ -374,6 +374,21 @@ export function apply(ctx: Context): void {
           return
         }
 
+        if (method === 'GET' && (path === '/api/plugin-market/self' || path === '/api/plugin-market/self/')) {
+          let repo: string | undefined
+          try {
+            const pkg = JSON.parse(readFileSync(
+              join(profileWebDir(), 'node_modules', 'dsh-plugin-market', 'package.json'),
+              'utf8',
+            )) as { repository?: unknown }
+            repo = normalizeRepo(pkg.repository)
+          } catch {
+            // Fall back to the hardcoded value below.
+          }
+          json(200, { ok: true, repo: repo ?? 'TheYoungChen/dsh-plugin-market' })
+          return
+        }
+
         if (method === 'GET' && (path === '/api/plugin-market/installed' || path === '/api/plugin-market/installed/')) {
           json(200, { ok: true, plugins: listInstalledPlugins(), bundles: readProfileManifest().dsh?.profile?.bundles ?? [] })
           return

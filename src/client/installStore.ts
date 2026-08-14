@@ -113,6 +113,18 @@ export function dismissJob(id: string): void {
   notify()
 }
 
+/**
+ * Show a transient notice toast (auto-dismissed by the toast view), used for
+ * quick feedback like "已卸载 xxx".
+ */
+export function pushNotice(text: string): void {
+  const id = `notice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+  jobs.set(id, {
+    id, name: text, source: '', type: 'notice', status: 'done', backgrounded: true, startedAt: Date.now(), output: '',
+  })
+  notify()
+}
+
 let spinInjected = false
 /** Inject the spinner keyframes once, for the loading glyph animation. */
 export function ensureSpinKeyframe(): void {

@@ -36,8 +36,29 @@ export interface MarketPage {
 /** Repos tagged `dsh-plugin` that are not the harness itself. */
 const EXCLUDED = new Set(['deepseek-ai/deepseek-harness'])
 
-/** The repo that hosts this plugin and its generated registry. */
+/** Fallback repo that hosts this plugin and its generated registry. */
 const REGISTRY_REPO = 'TheYoungChen/dsh-plugin-market'
+
+let registryRepo: string | null = null
+/**
+ * The repo actually hosting this market's registry: read from the installed
+ * market package itself, so a fork or rename follows its own repository. The
+ * hardcoded value is only the fallback.
+ */
+async function resolveRegistryRepo(): Promise<string> {
+  if (registryRepo !== null) return registryRepo
+  try {
+    const response = await fetch('/api/plugin-market/self')
+    const payload = (await response.json()) as { ok?: boolean; repo?: string }
+    if (payload.ok === true && typeof payload.repo === 'string' && payload.repo.length > 0) {
+      registryRepo = payload.repo
+      return registryRepo
+    }
+  } catch {
+    // Fall back to the hardcoded value below.
+  }
+  return REGISTRY_REPO
+}
 
 interface RawItem {
   full_name?: string
@@ -119,9 +140,10 @@ async function fetchRegistry(): Promise<MarketPage> {
     registryCache = stored
     return stored
   }
+  const repo = await resolveRegistryRepo()
   const urls = [
-    `https://cdn.jsdelivr.net/gh/${REGISTRY_REPO}@main/registry.json`,
-    `https://raw.githubusercontent.com/${REGISTRY_REPO}/main/registry.json`,
+    `https://cdn.jsdelivr.net/gh/${repo}@main/registry.json`,
+    `https://raw.githubusercontent.com/${repo}/main/registry.json`,
   ]
   let lastError: unknown = new Error('registry unavailable')
   for (const url of urls) {

@@ -1,8 +1,9 @@
-/** Settings tab: installed plugins split into user-installed vs built-in layers. */
+/** Settings tab: user-installed plugins, split into healthy vs broken layers. */
 
 import { useEffect, useState, type ReactNode } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { cleanupInstall, fetchInstalled, uninstallInstall, type InstalledPlugin } from './api.ts'
+import { pushNotice } from './installStore.ts'
 
 type Props = PropsRuntime<'settings.plugins.tab'> & PropsLocale<'pluginMarket'>
 type MarketT = Props['t']
@@ -25,16 +26,15 @@ const actionStyle: React.CSSProperties = {
 const dangerActionStyle: React.CSSProperties = {
   ...actionStyle, background: 'transparent', color: 'var(--dsw-alias-state-error-primary)',
 }
-const subtleStyle: React.CSSProperties = { flexShrink: 0, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }
 const emptyStyle: React.CSSProperties = { padding: '10px 0', margin: 0, fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }
 
 /** The layered "plugin management" view for the Settings → Plugins page. */
 export function InstalledManager({ t }: Props): ReactNode {
-  const [report, setReport] = useState<{ plugins: InstalledPlugin[]; bundles: string[] } | null>(null)
+  const [report, setReport] = useState<{ plugins: InstalledPlugin[] } | null>(null)
   const [confirmingUninstall, setConfirmingUninstall] = useState<InstalledPlugin | null>(null)
 
   const refresh = (force: boolean): void => {
-    void fetchInstalled(force).then(setReport, () => {})
+    void fetchInstalled(force).then(reportData => setReport({ plugins: reportData.plugins }), () => {})
   }
   useEffect(() => { refresh(false) }, [])
 
@@ -42,6 +42,7 @@ export function InstalledManager({ t }: Props): ReactNode {
     setConfirmingUninstall(null)
     try {
       await uninstallInstall(plugin.name, 'plugin', plugin.name.replace(/^@[^/]+\//, ''))
+      pushNotice(t('uninstall.notice', { name: plugin.name }))
     } catch {
       // The refresh below reflects reality either way.
     }
@@ -51,6 +52,7 @@ export function InstalledManager({ t }: Props): ReactNode {
   const onCleanup = async (plugin: InstalledPlugin): Promise<void> => {
     try {
       await cleanupInstall(plugin.name)
+      pushNotice(t('cleanup.notice', { name: plugin.name }))
     } catch {
       // The refresh below reflects reality either way.
     }
@@ -60,7 +62,6 @@ export function InstalledManager({ t }: Props): ReactNode {
   const plugins = report?.plugins ?? []
   const userPlugins = plugins.filter(plugin => !plugin.broken)
   const brokenPlugins = plugins.filter(plugin => plugin.broken)
-  const systemBundles = (report?.bundles ?? []).filter(bundle => !plugins.some(plugin => plugin.name === bundle))
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 14px 14px' }}>
@@ -93,15 +94,6 @@ export function InstalledManager({ t }: Props): ReactNode {
           ))}
         </>
       ) : null}
-
-      <h3 style={sectionStyle}>{t('manager.systemSection')} ({systemBundles.length})</h3>
-      {systemBundles.length === 0 ? <p style={emptyStyle}>{t('manager.emptySystem')}</p> : null}
-      {systemBundles.map(bundle => (
-        <div style={rowStyle} key={bundle}>
-          <span style={rowNameStyle}>{bundle}</span>
-          <span style={subtleStyle}>{t('manager.builtin')}</span>
-        </div>
-      ))}
     </div>
   )
 }

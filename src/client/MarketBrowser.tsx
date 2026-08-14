@@ -7,7 +7,7 @@ import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlu
 import { cleanupInstall, fetchInstalled, uninstallInstall, type InstalledPlugin } from './api.ts'
 import {
   backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
-  useInstallJobs, type InstallJob,
+  pushNotice, useInstallJobs, type InstallJob,
 } from './installStore.ts'
 
 /** Repositories fetched per page. */
@@ -351,6 +351,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const cleanupInstallEntry = async (info: InstalledPlugin): Promise<void> => {
     try {
       await cleanupInstall(info.name)
+      pushNotice(t('cleanup.notice', { name: info.name }))
     } catch {
       // The refresh below reflects the real state either way.
     }
@@ -368,6 +369,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
     setUninstalling(null)
     try {
       await uninstallInstall(target.name, target.type, target.repoName)
+      pushNotice(t('uninstall.notice', { name: target.name }))
     } catch {
       // The refresh below reflects the real state either way.
     }

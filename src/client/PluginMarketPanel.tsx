@@ -122,17 +122,24 @@ const toastOutputStyle: React.CSSProperties = {
   whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--dsw-alias-label-secondary)',
 }
 
-/** One background-install toast: persistent, expandable terminal view. */
+/** One background toast: persistent install view (expandable terminal), or a transient notice. */
 function InstallToast({ job, t }: { job: InstallJob; t: MarketT }): ReactNode {
+  const isNotice = job.type === 'notice'
   const [expanded, setExpanded] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const outputRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (job.status !== 'running') return
+    if (job.status !== 'running' || isNotice) return
     const timer = window.setInterval(() => { setNow(Date.now()) }, 1000)
     return () => { window.clearInterval(timer) }
-  }, [job.status])
+  }, [job.status, isNotice])
+
+  useEffect(() => {
+    if (!isNotice) return
+    const timer = window.setTimeout(() => { dismissJob(job.id) }, 3000)
+    return () => { window.clearTimeout(timer) }
+  }, [isNotice, job.id])
 
   useEffect(() => {
     const node = outputRef.current
@@ -144,6 +151,20 @@ function InstallToast({ job, t }: { job: InstallJob; t: MarketT }): ReactNode {
     : job.status === 'done' ? t('toast.done')
       : job.status === 'error' ? t('toast.failed')
         : t('toast.canceled')
+
+  if (isNotice) {
+    return (
+      <div style={toastStyle} role="status">
+        <div style={toastHeaderStyle}>
+          <span style={toastNameStyle}>{job.name}</span>
+          <span style={{ flex: 1 }} />
+          <button type="button" style={toastCloseStyle} aria-label={t('toast.close.aria')} onClick={() => { dismissJob(job.id) }}>
+            <IconCloseOutline16 size={14} />
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={toastStyle} role="status">

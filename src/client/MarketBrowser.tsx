@@ -331,6 +331,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
         <div style={dialogBackdropStyle}>
           <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={t('installing.title', { name: foreground.name })}>
             <h3 style={dialogTitleStyle}>{t('installing.title', { name: foreground.name })}</h3>
+            <code style={commandStyle}>pnpm add {foreground.source}</code>
             {foreground.status === 'running' ? (
               <p style={runningStyle}>
                 <span style={spinStyle}><IconLoadingOutline16 /></span>

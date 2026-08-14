@@ -1,6 +1,6 @@
 /** Sidebar footer action: a market badge, the market modal, and install toasts. */
 
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { IconArchiveOutline20, IconCloseOutline16, IconLoadingOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -66,16 +66,19 @@ const iconButtonStyle: React.CSSProperties = {
   border: 0, borderRadius: 6, background: 'transparent', color: 'var(--dsw-alias-label-tertiary)', cursor: 'pointer',
 }
 
-/* ---- install toasts (top-right of the conversation surface) ---- */
+/* ---- install toasts (top-right, below the session header utilities) ---- */
 const toastStackStyle: React.CSSProperties = {
-  position: 'fixed', top: 16, right: 16, zIndex: 60,
-  display: 'flex', flexDirection: 'column', gap: 8, width: 320, maxWidth: 'calc(100vw - 32px)',
+  position: 'fixed', top: 60, right: 16, zIndex: 60,
+  display: 'flex', flexDirection: 'column', gap: 8, width: 340, maxWidth: 'calc(100vw - 32px)',
 }
 const toastStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+  display: 'flex', flexDirection: 'column', overflow: 'hidden',
   border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12,
   background: 'var(--dsw-alias-bg-base)', boxShadow: 'var(--dsw-shadow-lv2)',
   color: 'var(--dsw-alias-label-primary)',
+}
+const toastHeaderStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer',
 }
 const toastBodyStyle: React.CSSProperties = {
   flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2,
@@ -97,20 +100,44 @@ const toastCloseStyle: React.CSSProperties = {
   flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 2,
   border: 0, borderRadius: 4, background: 'transparent', color: 'var(--dsw-alias-label-tertiary)', cursor: 'pointer',
 }
+const toastChevronStyle: React.CSSProperties = {
+  flexShrink: 0, color: 'var(--dsw-alias-label-tertiary)', fontSize: 10, lineHeight: 1,
+}
+/* ---- expanded terminal panel ---- */
+const toastTerminalStyle: React.CSSProperties = {
+  borderTop: '1px solid var(--dsw-alias-border-l2)', background: 'rgba(0,0,0,0.22)',
+}
+const toastCommandRowStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+  borderBottom: '1px solid var(--dsw-alias-border-l2)',
+  fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 11, lineHeight: 1.5,
+}
+const toastCommandPromptStyle: React.CSSProperties = { flexShrink: 0, color: 'var(--dsw-alias-state-success-primary)' }
+const toastCommandTextStyle: React.CSSProperties = {
+  color: 'var(--dsw-alias-label-primary)', whiteSpace: 'nowrap', overflowX: 'auto',
+}
+const toastOutputStyle: React.CSSProperties = {
+  maxHeight: 220, overflowY: 'auto', padding: '8px 12px',
+  fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 11, lineHeight: 1.5,
+  whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--dsw-alias-label-secondary)',
+}
 
-/** One background-install toast, with auto-dismiss on success. */
+/** One background-install toast: persistent, expandable terminal view. */
 function InstallToast({ job, t }: { job: InstallJob; t: MarketT }): ReactNode {
+  const [expanded, setExpanded] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const outputRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     if (job.status !== 'running') return
     const timer = window.setInterval(() => { setNow(Date.now()) }, 1000)
     return () => { window.clearInterval(timer) }
   }, [job.status])
+
   useEffect(() => {
-    if (job.status !== 'done') return
-    const timer = window.setTimeout(() => { dismissJob(job.id) }, 3000)
-    return () => { window.clearTimeout(timer) }
-  }, [job.status, job.id])
+    const node = outputRef.current
+    if (node !== null) node.scrollTop = node.scrollHeight
+  }, [job.output, expanded])
 
   const elapsed = Math.max(0, Math.floor((now - job.startedAt) / 1000))
   const statusText = job.status === 'running' ? `${t('toast.running')} · ${t('install.elapsed', { seconds: elapsed })}`
@@ -120,21 +147,40 @@ function InstallToast({ job, t }: { job: InstallJob; t: MarketT }): ReactNode {
 
   return (
     <div style={toastStyle} role="status">
-      {job.status === 'running' ? <span style={spinStyle}><IconLoadingOutline16 /></span> : null}
-      <div style={toastBodyStyle}>
-        <span style={toastNameStyle}>{job.name}</span>
-        <span style={toastStatusStyle}>{statusText}</span>
+      <div
+        style={toastHeaderStyle}
+        aria-expanded={expanded}
+        onClick={() => { setExpanded(value => !value) }}
+      >
+        {job.status === 'running' ? <span style={spinStyle}><IconLoadingOutline16 /></span> : null}
+        <div style={toastBodyStyle}>
+          <span style={toastNameStyle}>{job.name}</span>
+          <span style={toastStatusStyle}>{statusText}</span>
+        </div>
+        {job.status === 'running' ? (
+          <button type="button" style={toastTerminateStyle} onClick={event => { event.stopPropagation(); void cancelJob(job.id) }}>{t('install.terminate')}</button>
+        ) : null}
+        {job.status === 'done' ? (
+          <button type="button" style={toastRestartStyle} onClick={event => { event.stopPropagation(); window.location.reload() }}>{t('toast.restart')}</button>
+        ) : null}
+        {job.status !== 'running' ? (
+          <button type="button" style={toastCloseStyle} aria-label={t('toast.close.aria')} onClick={event => { event.stopPropagation(); dismissJob(job.id) }}>
+            <IconCloseOutline16 size={14} />
+          </button>
+        ) : null}
+        <span style={toastChevronStyle} aria-hidden>{expanded ? '▴' : '▾'}</span>
       </div>
-      {job.status === 'running' ? (
-        <button type="button" style={toastTerminateStyle} onClick={() => { void cancelJob(job.id) }}>{t('install.terminate')}</button>
-      ) : null}
-      {job.status === 'done' ? (
-        <button type="button" style={toastRestartStyle} onClick={() => { window.location.reload() }}>{t('toast.restart')}</button>
-      ) : null}
-      {job.status !== 'running' ? (
-        <button type="button" style={toastCloseStyle} aria-label={t('toast.close.aria')} onClick={() => { dismissJob(job.id) }}>
-          <IconCloseOutline16 size={14} />
-        </button>
+
+      {expanded ? (
+        <div style={toastTerminalStyle}>
+          <div style={toastCommandRowStyle}>
+            <span style={toastCommandPromptStyle}>$</span>
+            <span style={toastCommandTextStyle}>pnpm add {job.source}</span>
+          </div>
+          <div ref={outputRef} style={toastOutputStyle}>
+            {job.output.length > 0 ? job.output : t('toast.starting')}
+          </div>
+        </div>
       ) : null}
     </div>
   )

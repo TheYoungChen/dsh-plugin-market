@@ -40,7 +40,8 @@ export const zh = {
   'toast.done': '安装完成',
   'toast.failed': '安装失败',
   'toast.canceled': '已取消',
-  'toast.restart': '重启并生效',
+  'toast.restart': '立即重启',
+  'toast.starting': '等待输出…',
   'toast.close.aria': '关闭通知',
 } satisfies Record<string, string>
 
@@ -92,6 +93,7 @@ export const en = {
   'toast.done': 'Installed',
   'toast.failed': 'Install failed',
   'toast.canceled': 'Canceled',
-  'toast.restart': 'Restart to apply',
+  'toast.restart': 'Restart now',
+  'toast.starting': 'Waiting for output…',
   'toast.close.aria': 'Dismiss',
 } satisfies Record<PluginMarketKey, string>

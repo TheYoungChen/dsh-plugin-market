@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { IconLoadingOutline16, IconRightUpOutline16, IconSearchOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { fetchMarketPage, type MarketPlugin } from './github.ts'
+import { fetchLatestVersion, fetchMarketPage, invalidateRegistry, type MarketPlugin } from './github.ts'
 import { fetchInstalled, type InstalledPlugin } from './api.ts'
 import {
   backgroundJob, beginInstall, cancelJob, dismissJob, ensureSpinKeyframe,
@@ -164,6 +164,12 @@ const successTextStyle: React.CSSProperties = {
   margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-success-primary)',
 }
 
+/** Compare two version strings, ignoring a leading `v`. */
+function versionDiffers(a: string, b: string): boolean {
+  const norm = (value: string): string => value.replace(/^v/, '')
+  return norm(a) !== norm(b)
+}
+
 /** The market list, shared by the sidebar modal and the Settings tab. */
 export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const [view, setView] = useState<View>({ status: 'idle' })
@@ -172,6 +178,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
   const [foregroundId, setForegroundId] = useState<string | null>(null)
   const jobs = useInstallJobs()
   const [installed, setInstalled] = useState<readonly InstalledPlugin[]>([])
+  const [latestVersions, setLatestVersions] = useState<Record<string, string>>({})
   const refreshedDone = useRef(new Set<string>())
 
   useEffect(() => { ensureSpinKeyframe() }, [])
@@ -186,6 +193,18 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
       }
     }
   }, [jobs])
+
+  useEffect(() => {
+    for (const item of installed) {
+      const repo = item.repo
+      if (repo === undefined) continue
+      void fetchLatestVersion(repo).then(version => {
+        if (version !== undefined) {
+          setLatestVersions(prev => (prev[repo] === version ? prev : { ...prev, [repo]: version }))
+        }
+      }, () => {})
+    }
+  }, [installed])
 
   const foreground = jobs.find(job => job.id === foregroundId) ?? null
   const elapsed = useElapsed(foreground?.startedAt ?? Date.now(), foreground?.status === 'running')
@@ -218,6 +237,13 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
     || item.name.toLowerCase() === plugin.name.toLowerCase(),
   )
 
+  const isUpdate = (plugin: MarketPlugin): boolean => {
+    const info = installedInfo(plugin)
+    if (info === undefined) return false
+    const latest = latestVersions[plugin.fullName]
+    return latest !== undefined && info.version !== '' && versionDiffers(info.version, latest)
+  }
+
   const onConfirmInstall = async (plugin: MarketPlugin): Promise<void> => {
     const source = `github:${plugin.fullName}`
     setConfirming(null)
@@ -245,6 +271,7 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
             onChange={event => { setQuery(event.currentTarget.value) }}
           />
         </label>
+        <button type="button" style={actionButtonStyle} onClick={() => { invalidateRegistry(); load(1, query.trim()) }}>{t('refresh')}</button>
         <a style={guideStyle} href={GUIDE_URL} target="_blank" rel="noreferrer noopener">{t('guide')}</a>
       </div>
 
@@ -281,14 +308,27 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
                   </div>
                   <div style={cardTrailingStyle}>
                     {info !== undefined ? (
-                      <span style={installedTagStyle}>{t('installed')}{info.version !== '' ? ` v${info.version}` : ''}</span>
+                      <span style={installedTagStyle}>
+                        {isUpdate(plugin) && latestVersions[plugin.fullName] !== undefined
+                          ? `v${info.version} → v${latestVersions[plugin.fullName]}`
+                          : t('installed') + (info.version !== '' ? ` v${info.version}` : '')}
+                      </span>
                     ) : null}
                     <span style={starsStyle}>
                       <span style={starGlyphStyle} aria-hidden>★</span>
                       {plugin.stars}
                     </span>
                     {info !== undefined ? (
-                      <button type="button" disabled style={installedButtonStyle}>{t('installed')}</button>
+                      isUpdate(plugin) ? (
+                        <button
+                          type="button"
+                          style={installButtonStyle}
+                          data-market-install={plugin.fullName}
+                          onClick={() => { setConfirming(plugin) }}
+                        >{t('update')}</button>
+                      ) : (
+                        <button type="button" disabled style={installedButtonStyle}>{t('installed')}</button>
+                      )
                     ) : (
                       <button
                         type="button"
@@ -315,8 +355,8 @@ export function MarketBrowser({ t }: MarketBrowserProps): ReactNode {
 
       {confirming !== null ? (
         <div style={dialogBackdropStyle} onClick={() => { setConfirming(null) }}>
-          <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={t('confirm.title', { name: confirming.name })} onClick={stop}>
-            <h3 style={dialogTitleStyle}>{t('confirm.title', { name: confirming.name })}</h3>
+          <div style={dialogStyle} role="dialog" aria-modal="true" aria-label={isUpdate(confirming) ? t('confirm.title.update', { name: confirming.name }) : t('confirm.title', { name: confirming.name })} onClick={stop}>
+            <h3 style={dialogTitleStyle}>{isUpdate(confirming) ? t('confirm.title.update', { name: confirming.name }) : t('confirm.title', { name: confirming.name })}</h3>
             <p style={dialogBodyStyle}>{t('confirm.body', { source: `github:${confirming.fullName}`, profile: DEFAULT_PROFILE })}</p>
             <code style={commandStyle}>dsh plugin --profile {DEFAULT_PROFILE} add github:{confirming.fullName}</code>
             <div style={actionsStyle}>

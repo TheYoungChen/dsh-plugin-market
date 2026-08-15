@@ -23,6 +23,7 @@
     },
     "client": {
       "inject": [
+        "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-sidebar",
@@ -36,9 +37,11 @@
     "build": "tsdown --config tsdown.config.ts"
   },
   "peerDependencies": {
-    "react": "^18.2.0"
+    "react": "^18.2.0",
+    "@deepseek-ai/dsh-api-remotes": "*"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-api-remotes": "*",
     "@types/react": "~18.3.1",
     "react": "^18.2.0",
     "tsdown": "^0.22.2"

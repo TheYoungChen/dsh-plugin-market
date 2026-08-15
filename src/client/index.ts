@@ -4,9 +4,9 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { PluginInventorySnapshot } from '@deepseek-ai/dsh-api-remotes/client'
 import { PluginMarketPanel } from './PluginMarketPanel.tsx'
-import { MarketSettingsTab } from './MarketSettingsTab.tsx'
-import { InstalledManager } from './InstalledManager.tsx'
+import { MarketSettingsTab, type MarketSettingsTabInjected } from './MarketSettingsTab.tsx'
 import { en, zh, type PluginMarketKey } from './locales.ts'
 
 export type { PluginMarketKey } from './locales.ts'
@@ -16,7 +16,7 @@ export type { MarketPlugin, MarketPage } from './github.ts'
 export const NS = 'pluginMarket'
 
 /** Services required by the sidebar footer-action and Settings tab registrations. */
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'remote']
 
 /** Register the market entry above Settings, the Plugins tab, and the dictionaries. */
 export function apply(ctx: ClientContext): void {
@@ -30,19 +30,22 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
   }, PluginMarketPanel))
 
+  const injected = (): MarketSettingsTabInjected => ({
+    list: async (): Promise<PluginInventorySnapshot> => {
+      const result = await ctx.remote.pluginInventory.list()
+      if (!result.ok) {
+        throw new Error(`pluginInventory.list failed: ${result.error.code}: ${result.error.message}`)
+      }
+      return result.value
+    },
+  })
+
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
     id: 'market',
     order: 20,
     label: () => t('title'),
     locale: NS,
+    inject: injected,
   }, MarketSettingsTab))
-
-  ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
-    name: 'settings.plugins.tab',
-    id: 'installed',
-    order: 30,
-    label: () => t('manager.title'),
-    locale: NS,
-  }, InstalledManager))
 }
